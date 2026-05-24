@@ -1,0 +1,75 @@
+[database]
+# Storage engine. "sql" uses the legacy JDBC/SQL path; "fastdb" enables Ledger's local append-only store.
+engine = "sql"
+# The maximum amount of time to wait for the queue to drain when the server stops
+queueTimeoutMin = 5
+# The amount of time between checking if the queue is empty when the server stops
+queueCheckDelaySec = 10
+# Automatically purge entries older than the number of days specified. Set to -1 to disable
+autoPurgeDays = -1
+# The maximum amount of actions to commit in a single batch
+batchSize = 1000
+# The amount of time to wait between batches in ticks (20 ticks = 1 second)
+batchDelay = 10
+# Maximum queued actions before Ledger starts dropping new log entries to protect server memory. Set to -1 for unbounded.
+maxQueueSize = 250000
+# Maximum actions to replay from the on-disk overflow queue in one database batch.
+spillBatchSize = 5000
+# Maximum main-thread time spent applying rollback / restore work per tick. Set to 0 to disable this time budget.
+rollbackTickBudgetMillis = 5
+# Maximum rollback / restore actions scanned per tick. Set to 0 to disable this count budget.
+rollbackMaxActionsPerTick = 2000
+# Skip block rollback / restore entries if the current block no longer matches the logged expected state.
+rollbackSkipConflicts = true
+# The location of the database file. Defaults to the world folder if not specified
+#location = "./custom-dir"
+# Maximum size of each fastdb segment before a new file is opened
+fastSegmentSizeMiB = 128
+# Force the fastdb segment and state logs to disk after every batch. Safer but slower.
+fastFsyncOnBatch = false
+# Number of newest actions kept in resident fastdb indexes. Older actions remain on disk and are scanned cold.
+fastHotActionLimit = 2000000
+# Override the resident BitSet index cache budget in MiB. Set to -1 to auto-size from heap and system memory.
+fastIndexCacheMiB = -1
+
+[search]
+# Number of actions to show per page
+pageSize = 8
+# Permission level for purge command
+purgePermissionLevel = 4
+# Time zone to display timestamps in (UTC, UTC+1, America/Los_Angeles)
+timeZone = "UTC"
+# Maximum range allowed in rollback / restore commands
+maxRange = 100
+
+[color]
+# Colors in hex format
+primary = "#009688"
+primaryVariant = "#52c7b8"
+secondary = "#1e88e5"
+secondaryVariant = "#6ab7ff"
+light = "#c5d6f0"
+
+[actions]
+# Blacklists - blacklisted things will not be logged in the database
+# Example - Prevent all actions with stone or bat as the object from being logged
+# objectBlacklist = [
+#   "minecraft:stone",
+#   "minecraft:bat"
+# ]
+
+# Blacklists action types. Ex: "block-break", "entity-kill"
+typeBlacklist = []
+# Blacklists worlds/dimensions. Ex: "mincraft:the_end", "minecraft:overworld"
+worldBlacklist = []
+# Blacklists objects (Items, Mobs, Blocks). Ex: "minecraft:cobblestone", "minecraft:blaze"
+objectBlacklist = []
+# Blacklists sources. Ex: "lava", "gravity", "fire", "fall"
+sourceBlacklist = []
+
+[networking]
+# This section relates to Ledger's ability to interact with client mods for ease of use
+# Networking is enabled by default but you can disable and control it here
+
+# Change to true to allow Ledger client mod packets
+networking = true

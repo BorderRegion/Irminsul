@@ -1,0 +1,37 @@
+{
+    "schemaVersion": 1,
+    "id": "${id}",
+    "version": "${version}",
+    "name": "${name}",
+    "description": "Logs world events and allows for them to be rolled back",
+    "authors": [
+        "Potatoboy9999"
+    ],
+    "contact": {
+        "homepage": "https://quiltservertools.github.io/Ledger/latest/",
+        "sources": "https://github.com/QuiltServerTools/Ledger",
+        "issues": "https://github.com/QuiltServerTools/Ledger/issues"
+    },
+    "license": "LGPL",
+    "icon": "assets/ledger/icon.png",
+    "environment": "server",
+    "entrypoints": {
+        "server": [
+            {
+                "value": "com.github.quiltservertools.ledger.Ledger::INSTANCE"
+            }
+        ]
+    },
+    "mixins": [
+        "ledger.mixins.json"
+    ],
+    "depends": {
+        "fabricloader": ">=0.15.10",
+        "fabric": ">=${fabricApi}",
+        "fabric-language-kotlin": ">=${fabricKotlin}",
+        "minecraft": ">=${minecraft}"
+    },
+    "breaks": {
+        "cardboard": "*"
+    }
+}
