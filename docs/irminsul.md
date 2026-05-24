@@ -1,4 +1,4 @@
-# Ledger FastDB Backend
+# Irminsul Backend
 
 This branch adds a local append-only Ledger storage engine for high-write Minecraft
 servers. It is aimed at single-server deployments on local SSDs where Ledger's
@@ -7,29 +7,29 @@ rollback/restore operations.
 
 ## Scope
 
-FastDB is selected with:
+Irminsul is selected with:
 
 ```toml
 [database]
-engine = "fastdb"
+engine = "irminsul"
 ```
 
 The original SQL/JDBC backend is still available with `engine = "sql"`.
 
 ## Main Changes From Upstream Ledger
 
-- Added `LedgerStore`, `SqlLedgerStore`, and `FastLedgerStore` so the runtime can
-  switch between SQL and FastDB.
-- Added a local append-only FastDB store under `world/ledger-fastdb`.
+- Added `LedgerStore`, `SqlLedgerStore`, and `IrminsulLedgerStore` so the runtime can
+  switch between SQL and Irminsul.
+- Added a local append-only Irminsul store under `world/ledger-irminsul`.
 - Added runtime string dictionary encoding for action ids, world ids, object ids,
   block states, source names, and player names. Full registry strings are stored,
   so modded ids such as `modid:custom_block` are preserved.
 - Left `extraData` as raw UTF-8 because it is often unique and dictionary encoding
   it increases memory and metadata churn.
 - Added resident hot indexes for recent actions and cold scans for older actions.
-  `fastHotActionLimit` controls only memory residency; older actions remain on disk.
+  `irminsulHotActionLimit` controls only memory residency; older actions remain on disk.
 - Added bounded BitSet index caching sized from JVM heap and host memory, with an
-  optional `fastIndexCacheMiB` override.
+  optional `irminsulIndexCacheMiB` override.
 - Added on-disk queue spill under `world/ledger-queue` when `maxQueueSize` is hit.
   This prevents the async action queue from growing without bound under extreme
   write bursts.
@@ -42,8 +42,8 @@ The original SQL/JDBC backend is still available with `engine = "sql"`.
 - Added rollback conflict skipping (`rollbackSkipConflicts`) to avoid overwriting
   blocks changed after the selected history.
 - Added block-position dedupe for rollback/restore selection.
-- Added stream-oriented FastDB cold query/count/page paths.
-- Added stream-oriented FastDB rollback planning, reducing peak heap use when
+- Added stream-oriented Irminsul cold query/count/page paths.
+- Added stream-oriented Irminsul rollback planning, reducing peak heap use when
   selecting large cold-history rollbacks.
 - Updated `ledger status` and shutdown draining so on-disk spill is treated as
   pending queue work.
@@ -52,7 +52,7 @@ The original SQL/JDBC backend is still available with `engine = "sql"`.
 
 ```toml
 [database]
-engine = "fastdb"
+engine = "irminsul"
 batchSize = 1000
 batchDelay = 10
 maxQueueSize = 250000
@@ -60,20 +60,20 @@ spillBatchSize = 5000
 rollbackTickBudgetMillis = 5
 rollbackMaxActionsPerTick = 2000
 rollbackSkipConflicts = true
-fastSegmentSizeMiB = 128
-fastFsyncOnBatch = false
-fastHotActionLimit = 2000000
-fastIndexCacheMiB = -1
+irminsulSegmentSizeMiB = 128
+irminsulFsyncOnBatch = false
+irminsulHotActionLimit = 2000000
+irminsulIndexCacheMiB = -1
 ```
 
 Notes:
 
 - `maxQueueSize` bounds in-memory queued actions. Overflow goes to disk instead of
   being dropped unless disk spill itself fails.
-- `fastHotActionLimit` is a resident index limit, not a retention limit.
-- `fastIndexCacheMiB = -1` auto-sizes the BitSet cache from heap and host memory.
-- `fastFsyncOnBatch = true` is safer but slower.
-- For real production servers, keep a normal world backup strategy. FastDB is
+- `irminsulHotActionLimit` is a resident index limit, not a retention limit.
+- `irminsulIndexCacheMiB = -1` auto-sizes the BitSet cache from heap and host memory.
+- `irminsulFsyncOnBatch = true` is safer but slower.
+- For real production servers, keep a normal world backup strategy. Irminsul is
   append-only but is not a replacement for backups.
 
 ## Current Validation Results
@@ -81,7 +81,7 @@ Notes:
 Built on remote host:
 
 ```text
-/home/ubuntu/ledger-fastdb-dev/Ledger
+/home/ubuntu/ledger-irminsul-dev/Ledger
 ./gradlew compileKotlin
 ./gradlew remapJar
 ```
@@ -89,16 +89,16 @@ Built on remote host:
 Current jar:
 
 ```text
-C:\Users\Borde\Desktop\irminsul\artifacts\ledger-1.3.5+local-fastdb.jar
+C:\Users\Borde\Desktop\irminsul\artifacts\ledger-1.3.5+local-irminsul.jar
 SHA256: 3E6934053CBB25CDD943E795A354CE7508601F8F03D4B9247C4FA0805519F4F9
 ```
 
 Extreme queue/cold-history validation:
 
 ```text
-script: /home/ubuntu/ledger-fastdb-dev/validate_remote_spill_cold.sh
-run:    /home/ubuntu/ledger-fastdb-dev/spill-cold-run-20260525-000107
-config: maxQueueSize=256, spillBatchSize=512, fastHotActionLimit=10000
+script: /home/ubuntu/ledger-irminsul-dev/validate_remote_spill_cold.sh
+run:    /home/ubuntu/ledger-irminsul-dev/spill-cold-run-20260525-000107
+config: maxQueueSize=256, spillBatchSize=512, irminsulHotActionLimit=10000
 ```
 
 Observed:
@@ -110,7 +110,7 @@ cold search: 1011 ms
 rollback: 6026 ms
 rollback result: 12168/121680 selected actions after block-position dedupe
 final queue: memory=0, spillBytes=0, dropped=0
-fastdb size: 20029334 bytes
+irminsul size: 20029334 bytes
 ```
 
 The only error-like log line in this run was a Starlight class-loading warning:
@@ -119,14 +119,14 @@ The only error-like log line in this run was a Starlight class-loading warning:
 Error loading class: ca/spottedleaf/starlight/common/thread/SchedulingUtil
 ```
 
-Earlier FastDB/MySQL comparison on the same remote test server showed:
+Earlier Irminsul/MySQL comparison on the same remote test server showed:
 
 ```text
-FastDB queue drain after fill: about 1.0 s
+Irminsul queue drain after fill: about 1.0 s
 MySQL queue drain after fill:  about 35.1 s
-FastDB rollback range test:    about 1.0 s without heavy pacing
+Irminsul rollback range test:  about 1.0 s without heavy pacing
 MySQL rollback range test:     about 2.0 s
-FastDB storage:                about 20.0 MB
+Irminsul storage:              about 20.0 MB
 MySQL storage:                 about 68.7 MB
 ```
 

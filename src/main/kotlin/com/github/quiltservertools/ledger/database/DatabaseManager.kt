@@ -7,7 +7,8 @@ import com.github.quiltservertools.ledger.actionutils.RollbackExecutor
 import com.github.quiltservertools.ledger.actionutils.SearchResults
 import com.github.quiltservertools.ledger.config.DatabaseSpec
 import com.github.quiltservertools.ledger.config.config
-import com.github.quiltservertools.ledger.database.fast.FastLedgerStore
+import com.github.quiltservertools.ledger.config.isIrminsulEngine
+import com.github.quiltservertools.ledger.database.irminsul.IrminsulLedgerStore
 import com.github.quiltservertools.ledger.logInfo
 import com.github.quiltservertools.ledger.utility.PlayerResult
 import com.mojang.authlib.GameProfile
@@ -22,10 +23,11 @@ object DatabaseManager {
         get() = store.databaseType
 
     fun setup(dataSource: DataSource?) {
-        store = when (val engine = config[DatabaseSpec.engine].lowercase()) {
-            "fastdb", "fast", "ledger-fastdb" -> FastLedgerStore()
-            "sql", "sqlite", "jdbc", "" -> SqlLedgerStore(dataSource)
-            else -> error("Unknown Ledger database engine '$engine'. Expected 'sql' or 'fastdb'.")
+        val engine = config[DatabaseSpec.engine].lowercase()
+        store = when {
+            engine.isIrminsulEngine() -> IrminsulLedgerStore()
+            engine in setOf("sql", "sqlite", "jdbc", "") -> SqlLedgerStore(dataSource)
+            else -> error("Unknown Ledger database engine '$engine'. Expected 'sql' or 'irminsul'.")
         }
         store.setup()
         logInfo("Using Ledger database engine: ${store.databaseType}")

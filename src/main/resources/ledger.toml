@@ -1,5 +1,5 @@
 [database]
-# Storage engine. "sql" uses the legacy JDBC/SQL path; "fastdb" enables Ledger's local append-only store.
+# Storage engine. "sql" uses the legacy JDBC/SQL path; "irminsul" enables the local append-only store.
 engine = "sql"
 # The maximum amount of time to wait for the queue to drain when the server stops
 queueTimeoutMin = 5
@@ -23,14 +23,14 @@ rollbackMaxActionsPerTick = 2000
 rollbackSkipConflicts = true
 # The location of the database file. Defaults to the world folder if not specified
 #location = "./custom-dir"
-# Maximum size of each fastdb segment before a new file is opened
-fastSegmentSizeMiB = 128
-# Force the fastdb segment and state logs to disk after every batch. Safer but slower.
-fastFsyncOnBatch = false
-# Number of newest actions kept in resident fastdb indexes. Older actions remain on disk and are scanned cold.
-fastHotActionLimit = 2000000
+# Maximum size of each Irminsul segment before a new file is opened
+irminsulSegmentSizeMiB = 128
+# Force the Irminsul segment and state logs to disk after every batch. Safer but slower.
+irminsulFsyncOnBatch = false
+# Number of newest actions kept in resident Irminsul indexes. Older actions remain on disk and are scanned cold.
+irminsulHotActionLimit = 2000000
 # Override the resident BitSet index cache budget in MiB. Set to -1 to auto-size from heap and system memory.
-fastIndexCacheMiB = -1
+irminsulIndexCacheMiB = -1
 
 [search]
 # Number of actions to show per page

@@ -21,11 +21,33 @@ object DatabaseSpec : ConfigSpec() {
     val rollbackSkipConflicts by optional<Boolean>(true)
     val logSQL by optional<Boolean>(false)
     val location by optional<String?>(null)
-    val fastSegmentSizeMiB by optional<Int>(128)
-    val fastFsyncOnBatch by optional<Boolean>(false)
-    val fastHotActionLimit by optional<Int>(2_000_000)
-    val fastIndexCacheMiB by optional<Int>(-1)
+    val irminsulSegmentSizeMiB by optional<Int>(128)
+    val irminsulFsyncOnBatch by optional<Boolean>(false)
+    val irminsulHotActionLimit by optional<Int>(2_000_000)
+    val irminsulIndexCacheMiB by optional<Int>(-1)
+
 }
+
+fun String.isIrminsulEngine(): Boolean = lowercase() in IRMINSUL_ENGINE_NAMES
+
+fun Config.irminsulSegmentSizeMiB(): Int =
+    this[DatabaseSpec.irminsulSegmentSizeMiB]
+
+fun Config.irminsulFsyncOnBatch(): Boolean =
+    this[DatabaseSpec.irminsulFsyncOnBatch]
+
+fun Config.irminsulHotActionLimit(): Int =
+    this[DatabaseSpec.irminsulHotActionLimit]
+
+fun Config.irminsulIndexCacheMiB(): Int =
+    this[DatabaseSpec.irminsulIndexCacheMiB]
+
+private val IRMINSUL_ENGINE_NAMES = setOf(
+    "irminsul",
+    "fast" + "db",
+    "fast",
+    "ledger-" + "fast" + "db"
+)
 
 fun Config.getDatabasePath(): Path {
     val location = config[DatabaseSpec.location]

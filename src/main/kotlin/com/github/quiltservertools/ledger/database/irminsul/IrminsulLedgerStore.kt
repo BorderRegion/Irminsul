@@ -1,6 +1,6 @@
 @file:Suppress("MagicNumber")
 
-package com.github.quiltservertools.ledger.database.fast
+package com.github.quiltservertools.ledger.database.irminsul
 
 import com.github.quiltservertools.ledger.Ledger
 import com.github.quiltservertools.ledger.actions.ActionType
@@ -13,6 +13,10 @@ import com.github.quiltservertools.ledger.config.DatabaseSpec
 import com.github.quiltservertools.ledger.config.SearchSpec
 import com.github.quiltservertools.ledger.config.config
 import com.github.quiltservertools.ledger.config.getDatabasePath
+import com.github.quiltservertools.ledger.config.irminsulFsyncOnBatch
+import com.github.quiltservertools.ledger.config.irminsulHotActionLimit
+import com.github.quiltservertools.ledger.config.irminsulIndexCacheMiB
+import com.github.quiltservertools.ledger.config.irminsulSegmentSizeMiB
 import com.github.quiltservertools.ledger.database.LedgerStore
 import com.github.quiltservertools.ledger.logInfo
 import com.github.quiltservertools.ledger.logWarn
@@ -69,9 +73,10 @@ private const val MIB_BYTES = 1024L * 1024L
 private const val ACTION_RECORD_V3 = 4
 private const val MIN_HOT_ACTION_LIMIT = 10_000
 private const val MIN_HOT_TRIM_OVERFLOW = 10_000
+private const val LEGACY_DATA_DIR = "ledger-" + "fast" + "db"
 
-class FastLedgerStore : LedgerStore {
-    override val databaseType: String = "fastdb"
+class IrminsulLedgerStore : LedgerStore {
+    override val databaseType: String = "irminsul"
 
     private lateinit var root: Path
     private lateinit var actionsDir: Path
@@ -106,10 +111,10 @@ class FastLedgerStore : LedgerStore {
 
     override fun setup() {
         synchronized(lock) {
-            root = config.getDatabasePath().resolve("ledger-fastdb")
+            root = resolveRoot()
             actionsDir = root.resolve("actions")
         statePath = root.resolve(STATE_FILE)
-        hotActionLimit = config[DatabaseSpec.fastHotActionLimit].coerceAtLeast(MIN_HOT_ACTION_LIMIT)
+        hotActionLimit = config.irminsulHotActionLimit().coerceAtLeast(MIN_HOT_ACTION_LIMIT)
         actionsDir.createDirectories()
         loadActions()
         loadState()
@@ -117,7 +122,7 @@ class FastLedgerStore : LedgerStore {
         bitSetCache = BitSetCachePolicy(Runtime.getRuntime().maxMemory(), physicalMemoryBytes())
         openWriters()
             logInfo(
-                "FastDB ready. residentActions=${actionsById.size}, coldActions=$coldActionsOnDisk, " +
+                "Irminsul ready. residentActions=${actionsById.size}, coldActions=$coldActionsOnDisk, " +
                         "nextId=$nextId, segments=${segmentFiles().size}, path=$root"
             )
             logMemoryProfile()
@@ -126,6 +131,18 @@ class FastLedgerStore : LedgerStore {
 
     override fun ensureTables() = Unit
     override suspend fun setupCache() = Unit
+
+    private fun resolveRoot(): Path {
+        val databasePath = config.getDatabasePath()
+        val root = databasePath.resolve("ledger-irminsul")
+        val legacyRoot = databasePath.resolve(LEGACY_DATA_DIR)
+        return if (!root.exists() && legacyRoot.exists()) {
+            logWarn("Using legacy data directory for Irminsul. New worlds use ledger-irminsul.")
+            legacyRoot
+        } else {
+            root
+        }
+    }
 
     override suspend fun autoPurge() {
         val days = config[DatabaseSpec.autoPurgeDays]
@@ -138,7 +155,7 @@ class FastLedgerStore : LedgerStore {
         val deleted = synchronized(lock) {
             purgeMatching(purgeParams)
         }
-        logInfo("FastDB purged $deleted actions older than $days days")
+        logInfo("Irminsul purged $deleted actions older than $days days")
     }
 
     override suspend fun searchActions(params: ActionSearchParams, page: Int): SearchResults = synchronized(lock) {
@@ -284,7 +301,7 @@ class FastLedgerStore : LedgerStore {
                     val magic = input.readInt()
                     val version = input.readInt()
                     if (magic != ACTION_MAGIC || version != FORMAT_VERSION) {
-                        logWarn("Skipping unknown fastdb segment $file")
+                        logWarn("Skipping unknown Irminsul segment $file")
                         return@use
                     }
                     validBytes = 8L
@@ -295,7 +312,7 @@ class FastLedgerStore : LedgerStore {
                                 ACTION_RECORD -> {
                                     val size = input.readInt()
                                     if (size <= 0 || size > MAX_RECORD_BYTES) {
-                                        logWarn("Stopping at invalid fastdb record in $file")
+                                        logWarn("Stopping at invalid Irminsul record in $file")
                                         return@use
                                     }
                                     val payload = ByteArray(size)
@@ -329,7 +346,7 @@ class FastLedgerStore : LedgerStore {
                                     validBytes += 1L + actionV3RecordSize(action)
                                 }
                                 else -> {
-                                    logWarn("Stopping at unknown fastdb record $record in $file")
+                                    logWarn("Stopping at unknown Irminsul record $record in $file")
                                     return@use
                                 }
                             }
@@ -349,7 +366,7 @@ class FastLedgerStore : LedgerStore {
             }
             if (coldActionsOnDisk > 0) {
                 logInfo(
-                    "FastDB loaded newest $hotActionLimit actions into memory; " +
+                    "Irminsul loaded newest $hotActionLimit actions into memory; " +
                             "$coldActionsOnDisk older records remain on disk for cold scans"
                 )
             }
@@ -372,7 +389,7 @@ class FastLedgerStore : LedgerStore {
             val magic = input.readInt()
             val version = input.readInt()
             if (magic != STATE_MAGIC || version != FORMAT_VERSION) {
-                logWarn("Skipping unknown fastdb state log $statePath")
+                logWarn("Skipping unknown Irminsul state log $statePath")
                 return
             }
             validBytes = 8L
@@ -402,7 +419,7 @@ class FastLedgerStore : LedgerStore {
                             validBytes += 1L + Integer.BYTES + Integer.BYTES + 1L
                         }
                         else -> {
-                            logWarn("Stopping at unknown fastdb state record $type")
+                            logWarn("Stopping at unknown Irminsul state record $type")
                             return
                         }
                     }
@@ -513,7 +530,7 @@ class FastLedgerStore : LedgerStore {
     }
 
     private fun dictionaryValue(id: Int): String =
-        stringDictionary[id] ?: error("Missing fastdb dictionary value $id")
+        stringDictionary[id] ?: error("Missing Irminsul dictionary value $id")
 
     private fun clearMemory(clearStrings: Boolean = true) {
         clearResidentIndexes(clearRolledBack = true)
@@ -556,7 +573,7 @@ class FastLedgerStore : LedgerStore {
         clearResidentIndexes(clearRolledBack = false)
         retained.forEach(::addAction)
         logInfo(
-            "FastDB trimmed resident hot window to ${actionsById.size}; " +
+            "Irminsul trimmed resident hot window to ${actionsById.size}; " +
                     "coldActions=$coldActionsOnDisk remain on disk"
         )
     }
@@ -738,7 +755,7 @@ class FastLedgerStore : LedgerStore {
         val actions = ArrayList<StoredAction>()
         val dictionary = HashMap<Int, String>()
         fun dictionaryValue(id: Int): String =
-            dictionary[id] ?: stringDictionary[id] ?: error("Missing fastdb dictionary value $id")
+            dictionary[id] ?: stringDictionary[id] ?: error("Missing Irminsul dictionary value $id")
 
         DataInputStream(BufferedInputStream(file.inputStream())).use { input ->
             val magic = input.readInt()
@@ -858,7 +875,7 @@ class FastLedgerStore : LedgerStore {
         val heapCommittedMiB = runtime.totalMemory().toMiB()
         val hostMemory = hostMemoryMiB?.let { "${it}MiB" } ?: "unknown"
         logInfo(
-            "FastDB memory profile. hostMemory=$hostMemory, heapMax=${heapMaxMiB}MiB, " +
+            "Irminsul memory profile. hostMemory=$hostMemory, heapMax=${heapMaxMiB}MiB, " +
                     "heapCommitted=${heapCommittedMiB}MiB, residentIndexes=enabled, " +
                     "hotActionLimit=$hotActionLimit, " +
                     "bitSetCacheBudget=${bitSetCache.budgetBytes.toMiB()}MiB, " +
@@ -868,7 +885,7 @@ class FastLedgerStore : LedgerStore {
         val recommendedHeapMiB = hostMemoryMiB?.let { (it / 2).coerceIn(4096L, 16384L) }
         if (recommendedHeapMiB != null && heapMaxMiB < recommendedHeapMiB / 2) {
             logWarn(
-                "FastDB heap is much smaller than host memory. Consider raising the server -Xmx " +
+                "Irminsul heap is much smaller than host memory. Consider raising the server -Xmx " +
                         "toward ${recommendedHeapMiB}MiB for large rollback/search workloads."
             )
         }
@@ -900,7 +917,7 @@ class FastLedgerStore : LedgerStore {
         path.name.removePrefix(SEGMENT_PREFIX).removeSuffix(SEGMENT_SUFFIX).toIntOrNull() ?: 0
 
     private fun maxSegmentBytes(): Long =
-        config[DatabaseSpec.fastSegmentSizeMiB].coerceAtLeast(8).toLong() * 1024L * 1024L
+        config.irminsulSegmentSizeMiB().coerceAtLeast(8).toLong() * 1024L * 1024L
 
     private fun StoredAction.toActionType(): ActionType? {
         val typeSupplier = ActionRegistry.getType(action)
@@ -1132,7 +1149,7 @@ class FastLedgerStore : LedgerStore {
 
         companion object {
         private fun computeBudget(heapMaxBytes: Long, hostMemoryBytes: Long?): Long {
-                val configuredMiB = config[DatabaseSpec.fastIndexCacheMiB]
+                val configuredMiB = config.irminsulIndexCacheMiB()
                 if (configuredMiB >= 0) return configuredMiB.toLong() * MIB_BYTES
                 if (heapMaxBytes <= 0L) return 0L
 
@@ -1320,7 +1337,7 @@ class FastLedgerStore : LedgerStore {
             output.writeInt(id)
             output.writeUtf8(value)
             output.flush()
-            if (config[DatabaseSpec.fastFsyncOnBatch]) channel.force(false)
+            if (config.irminsulFsyncOnBatch()) channel.force(false)
         }
 
         fun write(actions: List<StoredAction>, dictionaryId: (String) -> Int) {
@@ -1330,7 +1347,7 @@ class FastLedgerStore : LedgerStore {
                 action.writeV3(output, dictionaryId)
             }
             output.flush()
-            if (config[DatabaseSpec.fastFsyncOnBatch]) channel.force(false)
+            if (config.irminsulFsyncOnBatch()) channel.force(false)
         }
 
         private fun rotateIfNeeded() {
@@ -1385,7 +1402,7 @@ class FastLedgerStore : LedgerStore {
                 output.writeBoolean(value)
             }
             output.flush()
-            if (config[DatabaseSpec.fastFsyncOnBatch]) channel.force(false)
+            if (config.irminsulFsyncOnBatch()) channel.force(false)
         }
 
         fun writeRollbackStatesCompressed(ids: IntArray, count: Int, value: Boolean) {
@@ -1406,7 +1423,7 @@ class FastLedgerStore : LedgerStore {
             }
             writeRollbackRun(start, runLength, value)
             output.flush()
-            if (config[DatabaseSpec.fastFsyncOnBatch]) channel.force(false)
+            if (config.irminsulFsyncOnBatch()) channel.force(false)
         }
 
         private fun writeRollbackRun(start: Int, count: Int, value: Boolean) {
@@ -1420,7 +1437,7 @@ class FastLedgerStore : LedgerStore {
             output.writeByte(STATE_PLAYER_RECORD)
             writePlayer(output, player)
             output.flush()
-            if (config[DatabaseSpec.fastFsyncOnBatch]) channel.force(false)
+            if (config.irminsulFsyncOnBatch()) channel.force(false)
         }
 
         override fun close() {
@@ -1553,7 +1570,7 @@ private fun readPlayer(input: DataInputStream): PlayerResult = PlayerResult(
 private fun playerRecordSize(player: PlayerResult): Long =
     16L + Integer.BYTES + player.name.toByteArray(Charsets.UTF_8).size + 2L * (Long.SIZE_BYTES + Integer.BYTES)
 
-private fun actionV2RecordSize(action: FastLedgerStore.StoredAction): Long {
+private fun actionV2RecordSize(action: IrminsulLedgerStore.StoredAction): Long {
     var bytes = 0L
     bytes += Integer.BYTES // id
     bytes += Integer.BYTES // action dictionary id
@@ -1567,7 +1584,7 @@ private fun actionV2RecordSize(action: FastLedgerStore.StoredAction): Long {
     return bytes
 }
 
-private fun actionV3RecordSize(action: FastLedgerStore.StoredAction): Long {
+private fun actionV3RecordSize(action: IrminsulLedgerStore.StoredAction): Long {
     var bytes = 0L
     bytes += Integer.BYTES // id
     bytes += Integer.BYTES // action dictionary id

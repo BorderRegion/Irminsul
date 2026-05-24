@@ -4,6 +4,7 @@ import com.github.quiltservertools.ledger.Ledger
 import com.github.quiltservertools.ledger.config.DatabaseSpec
 import com.github.quiltservertools.ledger.config.config
 import com.github.quiltservertools.ledger.config.getDatabasePath
+import com.github.quiltservertools.ledger.config.isIrminsulEngine
 import net.minecraft.server.MinecraftServer
 import javax.sql.DataSource
 
@@ -28,7 +29,7 @@ object ExtensionManager {
     }
 
     internal fun serverStarting(server: MinecraftServer) {
-        if (config[DatabaseSpec.engine].equals("fastdb", ignoreCase = true)) {
+        if (config[DatabaseSpec.engine].isIrminsulEngine()) {
             dataSource = null
             return
         }
