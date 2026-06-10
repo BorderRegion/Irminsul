@@ -80,7 +80,7 @@ data class HandshakeC2SPacket(val nbt: NbtCompound?) : CustomPayload {
             }
 
             return Optional.of(
-                ModInfo(nbt.getString("modid"), nbt.getString("version"), nbt.getInt("protocol_version"))
+                ModInfo(nbt.getString("modid", ""), nbt.getString("version", ""), nbt.getInt("protocol_version", 0))
             )
         }
     }

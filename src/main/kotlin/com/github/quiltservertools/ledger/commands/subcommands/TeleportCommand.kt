@@ -32,8 +32,8 @@ object TeleportCommand : BuildableCommand {
 
     private fun teleport(context: Context, world: ServerWorld, posArg: PosArgument): Int {
         val player = context.source.playerOrThrow
-        val pos = posArg.toAbsolutePos(context.source)
-        player.teleport(world, pos.x, pos.y, pos.z, player.yaw, player.pitch)
+        val pos = posArg.getPos(context.source)
+        player.teleport(world, pos.x, pos.y, pos.z, setOf(), player.yaw, player.pitch, false)
 
         return 1
     }

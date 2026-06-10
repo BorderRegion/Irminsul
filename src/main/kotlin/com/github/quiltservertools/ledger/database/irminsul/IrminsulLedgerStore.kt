@@ -25,7 +25,6 @@ import com.github.quiltservertools.ledger.utility.Negatable
 import com.github.quiltservertools.ledger.utility.PlayerResult
 import com.mojang.authlib.GameProfile
 import net.minecraft.util.Identifier
-import net.minecraft.util.math.BlockBox
 import net.minecraft.util.math.BlockPos
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -760,18 +759,24 @@ class IrminsulLedgerStore : LedgerStore {
         DataInputStream(BufferedInputStream(file.inputStream())).use { input ->
             val magic = input.readInt()
             val version = input.readInt()
-            if (magic != ACTION_MAGIC || version != FORMAT_VERSION) return emptyList()
+            if (magic != ACTION_MAGIC || version != FORMAT_VERSION) {
+                return emptyList()
+            }
 
             while (true) {
                 try {
                     when (input.readUnsignedByte()) {
                         ACTION_RECORD -> {
                             val size = input.readInt()
-                            if (size <= 0 || size > MAX_RECORD_BYTES) return actions
+                            if (size <= 0 || size > MAX_RECORD_BYTES) {
+                                return actions
+                            }
                             val payload = ByteArray(size)
                             input.readFully(payload)
                             val action = StoredAction.read(DataInputStream(ByteArrayInputStream(payload)))
-                            if (action.id < maxExclusiveId) actions.add(action)
+                            if (action.id < maxExclusiveId) {
+                                actions.add(action)
+                            }
                         }
                         STRING_DICTIONARY_RECORD -> {
                             val id = input.readInt()
@@ -779,13 +784,19 @@ class IrminsulLedgerStore : LedgerStore {
                         }
                         ACTION_RECORD_V2 -> {
                             val action = StoredAction.readV2(input, ::dictionaryValue)
-                            if (action.id < maxExclusiveId) actions.add(action)
+                            if (action.id < maxExclusiveId) {
+                                actions.add(action)
+                            }
                         }
                         ACTION_RECORD_V3 -> {
                             val action = StoredAction.readV3(input, ::dictionaryValue)
-                            if (action.id < maxExclusiveId) actions.add(action)
+                            if (action.id < maxExclusiveId) {
+                                actions.add(action)
+                            }
                         }
-                        else -> return actions
+                        else -> {
+                            return actions
+                        }
                     }
                 } catch (_: EOFException) {
                     return actions

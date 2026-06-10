@@ -200,6 +200,7 @@ object RollbackExecutor {
         )
     }
 
+    @Suppress("TooGenericExceptionCaught")
     private fun runAction(
         server: MinecraftServer,
         action: ActionType,
@@ -212,8 +213,10 @@ object RollbackExecutor {
                 if (expectedCurrent != null) {
                     if (hasConflict(server, expectedCurrent, mode)) {
                         false
-                    } else RollbackLogGuard.withSuppressedConflictCheck {
-                        applyAction(server, action, mode)
+                    } else {
+                        RollbackLogGuard.withSuppressedConflictCheck {
+                            applyAction(server, action, mode)
+                        }
                     }
                 } else {
                     applyAction(server, action, mode)
@@ -277,10 +280,12 @@ object RollbackExecutor {
             actionsThisTick >= maxActionsPerTick || System.nanoTime() - tickStartedNanos >= tickBudgetNanos
 
         companion object {
+            private const val NANOS_PER_MILLI = 1_000_000L
+
             fun fromConfig(): RollbackPacing {
                 val budgetMillis = Ledger.config[DatabaseSpec.rollbackTickBudgetMillis]
                 val maxActions = Ledger.config[DatabaseSpec.rollbackMaxActionsPerTick]
-                val budgetNanos = if (budgetMillis <= 0) Long.MAX_VALUE else budgetMillis * 1_000_000L
+                val budgetNanos = if (budgetMillis <= 0) Long.MAX_VALUE else budgetMillis * NANOS_PER_MILLI
                 val actionsPerTick = if (maxActions <= 0) Int.MAX_VALUE else max(1, maxActions)
 
                 return RollbackPacing(budgetNanos, actionsPerTick)

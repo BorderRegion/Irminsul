@@ -1,3 +1,6 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
+
 plugins {
     alias(libs.plugins.kotlin)
     alias(libs.plugins.loom)
@@ -14,7 +17,7 @@ val modName: String by project
 val modVersion: String by project
 val mavenGroup: String by project
 
-base.archivesBaseName = modId
+base.archivesName.set(modId)
 version = "$modVersion${getVersionMetadata()}"
 group = mavenGroup
 
@@ -117,9 +120,9 @@ tasks {
         options.release.set(javaVersion.toString().toInt())
     }
 
-    compileKotlin {
-        kotlinOptions {
-            jvmTarget = javaVersion.toString()
+    withType<KotlinJvmCompile> {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_21)
         }
     }
 
@@ -136,7 +139,7 @@ tasks {
 
     remapJar {
         dependsOn(shadowJar)
-        input.set(shadowJar.get().archiveFile)
+        inputFile.set(shadowJar.get().archiveFile)
     }
 
     shadowJar {
@@ -165,16 +168,6 @@ tasks {
         // relocate("org.sqlite", relocPath + "org.sqlite")
     }
 
-    compileKotlin {
-        kotlinOptions {
-            jvmTarget = javaVersion.toString()
-        }
-    }
-    compileTestKotlin {
-        kotlinOptions {
-            jvmTarget = javaVersion.toString()
-        }
-    }
 }
 
 // configure the maven publication
@@ -194,7 +187,7 @@ publishing {
 detekt {
     buildUponDefaultConfig = true
     autoCorrect = true
-    config = rootProject.files("detekt.yml")
+    config.setFrom(rootProject.files("detekt.yml"))
 }
 
 gitHooks {
@@ -205,7 +198,13 @@ gitHooks {
 
 fun getVersionMetadata(): String {
     val buildId = System.getenv("GITHUB_RUN_NUMBER")
+    val refType = System.getenv("GITHUB_REF_TYPE")
+    val refName = System.getenv("GITHUB_REF_NAME")
     val workflow = System.getenv("GITHUB_WORKFLOW")
+
+    if (refType == "tag" && refName?.startsWith("irminsul-") == true) {
+        return "+${refName.removePrefix("irminsul-")}"
+    }
 
     if (workflow == "Release") {
         return ""

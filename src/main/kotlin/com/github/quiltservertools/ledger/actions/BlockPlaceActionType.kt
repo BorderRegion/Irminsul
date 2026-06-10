@@ -1,9 +1,9 @@
 package com.github.quiltservertools.ledger.actions
 
+import com.github.quiltservertools.ledger.utility.NbtUtils
 import com.github.quiltservertools.ledger.utility.TextColorPallet
 import com.github.quiltservertools.ledger.utility.getWorld
 import com.github.quiltservertools.ledger.utility.literal
-import net.minecraft.nbt.StringNbtReader
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.command.ServerCommandSource
 import net.minecraft.text.HoverEvent
@@ -29,7 +29,9 @@ class BlockPlaceActionType : BlockChangeActionType() {
         val state = newBlockState()
         world.setBlockState(pos, state)
         if (state.hasBlockEntity() && extraData != null) {
-            world.getBlockEntity(pos)?.read(StringNbtReader.parse(extraData), server.registryManager)
+            world.getBlockEntity(pos)?.let {
+                NbtUtils.readBlockEntity(it, NbtUtils.readCompound(extraData), server.registryManager)
+            }
         }
 
         return true
@@ -41,11 +43,6 @@ class BlockPlaceActionType : BlockChangeActionType() {
             objectIdentifier
         )
     ).setStyle(TextColorPallet.secondaryVariant).styled {
-        it.withHoverEvent(
-            HoverEvent(
-                HoverEvent.Action.SHOW_TEXT,
-                objectIdentifier.toString().literal()
-            )
-        )
+        it.withHoverEvent(HoverEvent.ShowText(objectIdentifier.toString().literal()))
     }
 }

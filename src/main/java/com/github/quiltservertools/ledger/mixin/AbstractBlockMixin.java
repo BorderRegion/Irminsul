@@ -9,8 +9,8 @@ import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
 import net.minecraft.world.explosion.Explosion;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -25,10 +25,10 @@ public abstract class AbstractBlockMixin {
     @Inject(
             method = "onExploded",
             at = @At(
-                    value = "INVOKE", target = "Lnet/minecraft/world/World;setBlockState(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;I)Z"
+                    value = "INVOKE", target = "Lnet/minecraft/server/world/ServerWorld;setBlockState(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;I)Z"
             )
     )
-    private void ledgerBlockExplodeCallback(BlockState blockState, World world, BlockPos blockPos, Explosion explosion, BiConsumer<ItemStack, BlockPos> biConsumer, CallbackInfo ci) {
+    private void ledgerBlockExplodeCallback(BlockState blockState, ServerWorld world, BlockPos blockPos, Explosion explosion, BiConsumer<ItemStack, BlockPos> biConsumer, CallbackInfo ci) {
         LivingEntity entity;
         if (explosion.getCausingEntity() instanceof PlayerCausable playerCausable && playerCausable.getCausingPlayer() != null) {
             entity = playerCausable.getCausingPlayer();

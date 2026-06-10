@@ -146,20 +146,19 @@ object ActionQueueService {
         }
     }
 
+    @Suppress("TooGenericExceptionCaught")
     private fun spillAction(action: ActionType): Boolean {
         return try {
             synchronized(spillLock) {
                 val appendExisting = ::spillPath.isInitialized &&
-                        spillPath.exists() &&
-                        runCatching { Files.size(spillPath) >= SPILL_HEADER_BYTES }.getOrDefault(false)
-                val options = if (appendExisting) {
-                    arrayOf(StandardOpenOption.CREATE, StandardOpenOption.APPEND)
+                    spillPath.exists() &&
+                    runCatching { Files.size(spillPath) >= SPILL_HEADER_BYTES }.getOrDefault(false)
+                val spillOutputStream = if (appendExisting) {
+                    spillPath.outputStream(StandardOpenOption.CREATE, StandardOpenOption.APPEND)
                 } else {
-                    arrayOf(StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
+                    spillPath.outputStream(StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
                 }
-                DataOutputStream(BufferedOutputStream(spillPath.outputStream(
-                    *options
-                ))).use { output ->
+                DataOutputStream(BufferedOutputStream(spillOutputStream)).use { output ->
                     if (!appendExisting) {
                         output.writeInt(SPILL_MAGIC)
                         output.writeInt(SPILL_VERSION)
@@ -207,8 +206,8 @@ object ActionQueueService {
     }
 
     private fun hasSpill(): Boolean =
-        (::spillPath.isInitialized && spillPath.hasSpillRecords()) ||
-                (::spillProcessingPath.isInitialized && processingHasSpillRecords())
+        ::spillPath.isInitialized && spillPath.hasSpillRecords() ||
+            ::spillProcessingPath.isInitialized && processingHasSpillRecords()
 
     private fun computeSpillPendingBytes(): Long {
         if (!::spillPath.isInitialized || !::spillProcessingPath.isInitialized) return 0L
@@ -306,14 +305,23 @@ object ActionQueueService {
 
     private fun writeProcessingOffset(offset: Long) {
         val temp = spillProcessingOffsetPath.resolveSibling("${spillProcessingOffsetPath.fileName}.tmp")
-        DataOutputStream(BufferedOutputStream(temp.outputStream(
-            StandardOpenOption.CREATE,
-            StandardOpenOption.TRUNCATE_EXISTING
-        ))).use { output ->
+        DataOutputStream(
+            BufferedOutputStream(
+                temp.outputStream(
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+                )
+            )
+        ).use { output ->
             output.writeLong(offset.coerceAtLeast(SPILL_HEADER_BYTES.toLong()))
         }
         runCatching {
-            Files.move(temp, spillProcessingOffsetPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            Files.move(
+                temp,
+                spillProcessingOffsetPath,
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING
+            )
         }.getOrElse {
             Files.move(temp, spillProcessingOffsetPath, StandardCopyOption.REPLACE_EXISTING)
         }

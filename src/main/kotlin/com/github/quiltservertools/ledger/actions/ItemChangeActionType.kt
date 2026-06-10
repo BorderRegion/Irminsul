@@ -15,7 +15,6 @@ import net.minecraft.block.LecternBlock
 import net.minecraft.block.entity.ChestBlockEntity
 import net.minecraft.block.entity.LecternBlockEntity
 import net.minecraft.inventory.Inventory
-import net.minecraft.item.AliasedBlockItem
 import net.minecraft.item.BlockItem
 import net.minecraft.item.ItemStack
 import net.minecraft.item.Items
@@ -32,7 +31,7 @@ import net.minecraft.util.math.BlockPos
 abstract class ItemChangeActionType : AbstractActionType() {
     override fun getTranslationType(): String {
         val item = Registries.ITEM.get(objectIdentifier)
-        return if (item is BlockItem && item !is AliasedBlockItem) {
+        return if (item is BlockItem) {
             "block"
         } else {
             "item"
@@ -56,17 +55,13 @@ abstract class ItemChangeActionType : AbstractActionType() {
                 )
             )
         ).setStyle(TextColorPallet.secondaryVariant).styled {
-            it.withHoverEvent(
-                HoverEvent(
-                    HoverEvent.Action.SHOW_ITEM,
-                    HoverEvent.ItemStackContent(stack)
-                )
-            )
+            it.withHoverEvent(HoverEvent.ShowItem(stack))
         }
     }
 
     protected fun previewItemChange(preview: Preview, player: ServerPlayerEntity, insert: Boolean) {
-        val world = player.server.getWorld(world)
+        val server = player.entityWorld.server ?: return
+        val world = server.getWorld(world)
         val state = world?.getBlockState(pos)
         state?.isOf(Blocks.CHEST)?.let {
             if (it) {
@@ -82,7 +77,7 @@ abstract class ItemChangeActionType : AbstractActionType() {
     private fun addPreview(preview: Preview, player: ServerPlayerEntity, pos: BlockPos, insert: Boolean) {
         preview.modifiedItems.compute(pos) { _, list ->
             list ?: mutableListOf()
-        }?.add(Pair(getStack(player.server), insert))
+        }?.add(Pair(getStack(player.entityWorld.server ?: return), insert))
     }
 
     private fun getInventory(world: ServerWorld): Inventory? {
@@ -90,7 +85,7 @@ abstract class ItemChangeActionType : AbstractActionType() {
         val blockState = world.getBlockState(pos)
         val block = blockState.block
         if (block is InventoryProvider) {
-            inventory = (block as InventoryProvider).getInventory(blockState, world, pos)
+            inventory = block.getInventory(blockState, world, pos)
         } else if (world.getBlockEntity(pos) != null) {
             val blockEntity = world.getBlockEntity(pos)!!
             if (blockEntity is Inventory) {

@@ -11,7 +11,6 @@ import com.github.quiltservertools.ledger.utility.getWorld
 import com.github.quiltservertools.ledger.utility.literal
 import net.minecraft.block.BlockState
 import net.minecraft.block.Blocks
-import net.minecraft.nbt.StringNbtReader
 import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket
 import net.minecraft.registry.Registries
 import net.minecraft.server.MinecraftServer
@@ -31,7 +30,9 @@ open class BlockChangeActionType : AbstractActionType() {
 
         world.setBlockState(pos, oldBlockState())
         if (extraData != null) {
-            world.getBlockEntity(pos)?.read(StringNbtReader.parse(extraData), server.registryManager)
+            world.getBlockEntity(pos)?.let {
+                NbtUtils.readBlockEntity(it, NbtUtils.readCompound(extraData), server.registryManager)
+            }
         }
         world.chunkManager.markForUpdate(pos)
 
@@ -39,7 +40,7 @@ open class BlockChangeActionType : AbstractActionType() {
     }
 
     override fun previewRollback(preview: Preview, player: ServerPlayerEntity) {
-        if (player.world.registryKey.value == world) {
+        if (player.entityWorld.registryKey.value == world) {
             player.networkHandler.sendPacket(BlockUpdateS2CPacket(pos, oldBlockState()))
             preview.positions.add(pos)
         }
@@ -55,7 +56,7 @@ open class BlockChangeActionType : AbstractActionType() {
     }
 
     override fun previewRestore(preview: Preview, player: ServerPlayerEntity) {
-        if (player.world.registryKey.value == world) {
+        if (player.entityWorld.registryKey.value == world) {
             player.networkHandler.sendPacket(BlockUpdateS2CPacket(pos, newBlockState()))
             preview.positions.add(pos)
         }
@@ -67,21 +68,16 @@ open class BlockChangeActionType : AbstractActionType() {
         val text = Text.literal("")
         text.append(
             Text.translatable(
-            Util.createTranslationKey(
-                this.getTranslationType(),
-                oldObjectIdentifier
-            )
-        ).setStyle(TextColorPallet.secondaryVariant).styled {
-            it.withHoverEvent(
-                HoverEvent(
-                    HoverEvent.Action.SHOW_TEXT,
-                    oldObjectIdentifier.toString().literal()
+                Util.createTranslationKey(
+                    this.getTranslationType(),
+                    oldObjectIdentifier
                 )
-            )
-        }
+            ).setStyle(TextColorPallet.secondaryVariant).styled {
+                it.withHoverEvent(HoverEvent.ShowText(oldObjectIdentifier.toString().literal()))
+            }
         )
         if (oldObjectIdentifier != objectIdentifier) {
-            text.append(" → ".literal())
+            text.append(" -> ".literal())
             text.append(
                 Text.translatable(
                     Util.createTranslationKey(
@@ -89,12 +85,7 @@ open class BlockChangeActionType : AbstractActionType() {
                         objectIdentifier
                     )
                 ).setStyle(TextColorPallet.secondaryVariant).styled {
-                    it.withHoverEvent(
-                        HoverEvent(
-                            HoverEvent.Action.SHOW_TEXT,
-                            objectIdentifier.toString().literal()
-                        )
-                    )
+                    it.withHoverEvent(HoverEvent.ShowText(objectIdentifier.toString().literal()))
                 }
             )
         }
@@ -104,25 +95,25 @@ open class BlockChangeActionType : AbstractActionType() {
     fun oldBlockState() = checkForBlockState(
         oldObjectIdentifier,
         oldObjectState?.let {
-        NbtUtils.blockStateFromProperties(
-            StringNbtReader.parse(it),
-            oldObjectIdentifier
-        )
-    }
+            NbtUtils.blockStateFromProperties(
+                NbtUtils.readCompound(it),
+                oldObjectIdentifier
+            )
+        }
     )
 
     fun newBlockState() = checkForBlockState(
         objectIdentifier,
         objectState?.let {
-        NbtUtils.blockStateFromProperties(
-            StringNbtReader.parse(it),
-            objectIdentifier
-        )
-    }
+            NbtUtils.blockStateFromProperties(
+                NbtUtils.readCompound(it),
+                objectIdentifier
+            )
+        }
     )
 
     private fun checkForBlockState(identifier: Identifier, checkState: BlockState?): BlockState {
-        val block = Registries.BLOCK.getOrEmpty(identifier)
+        val block = Registries.BLOCK.getOptionalValue(identifier)
         if (block.isEmpty) {
             logWarn("Unknown block $identifier")
             return Blocks.AIR.defaultState
@@ -136,6 +127,6 @@ open class BlockChangeActionType : AbstractActionType() {
 
     protected fun shouldSkipConflict(currentState: BlockState, expectedState: BlockState): Boolean =
         !RollbackLogGuard.isConflictCheckSuppressed &&
-                config[DatabaseSpec.rollbackSkipConflicts] &&
-                currentState != expectedState
+            config[DatabaseSpec.rollbackSkipConflicts] &&
+            currentState != expectedState
 }

@@ -25,7 +25,6 @@ object DatabaseSpec : ConfigSpec() {
     val irminsulFsyncOnBatch by optional<Boolean>(false)
     val irminsulHotActionLimit by optional<Int>(2_000_000)
     val irminsulIndexCacheMiB by optional<Int>(-1)
-
 }
 
 fun String.isIrminsulEngine(): Boolean = lowercase() in IRMINSUL_ENGINE_NAMES

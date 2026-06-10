@@ -7,6 +7,7 @@ import net.minecraft.block.LeveledCauldronBlock;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.fluid.Fluid;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.minecraft.world.biome.Biome;
@@ -48,9 +49,9 @@ public abstract class LeveledCauldronBlockMixin {
         }
     }
 
-    @Inject(method = "onEntityCollision", at = @At(value = "INVOKE",
+    @Inject(method = "method_71627", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/block/LeveledCauldronBlock;onFireCollision(Lnet/minecraft/block/BlockState;Lnet/minecraft/world/World;Lnet/minecraft/util/math/BlockPos;)V"))
-    private void ledgerLogPlayerExtinguish(BlockState state, World world, BlockPos pos, Entity entity, CallbackInfo ci) {
+    private void ledgerLogPlayerExtinguish(ServerWorld serverWorld, BlockPos pos, BlockState state, World world, Entity entity, CallbackInfo ci) {
         if (entity instanceof PlayerEntity) {
             playerEntity = (PlayerEntity) entity;
         }

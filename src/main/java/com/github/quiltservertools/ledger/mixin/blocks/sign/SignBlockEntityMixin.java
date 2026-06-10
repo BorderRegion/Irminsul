@@ -54,7 +54,7 @@ public abstract class SignBlockEntityMixin {
         BlockState state = instance.getCachedState();
 
         // a bad hack to copy the old sign block entity for rollbacks
-        @Nullable BlockEntity oldSignEntity = BlockEntity.createFromNbt(pos, state, instance.createNbtWithId(registryManager), registryManager);
+        @Nullable BlockEntity oldSignEntity = BlockEntity.createFromNbt(pos, state, instance.createNbtWithIdentifyingData(registryManager), registryManager);
 
         boolean result = original.call(instance, textChanger, front);
         if (result && oldSignEntity != null) {

@@ -25,10 +25,11 @@ object MessageUtils {
     suspend fun sendSearchResults(source: ServerCommandSource, results: SearchResults, header: Text) {
         // If the player has a Ledger compatible client, we send results as action packets rather than as chat messages
         if (source.hasPlayer() && source.playerOrThrow.hasNetworking()) {
+            val player = source.playerOrThrow
             for (n in results.page..results.pages) {
                 val networkResults = DatabaseManager.searchActions(results.searchParams, n)
                 networkResults.actions.forEach {
-                    ServerPlayNetworking.send(source.player, ActionS2CPacket(it))
+                    ServerPlayNetworking.send(player, ActionS2CPacket(it))
                 }
             }
             return
@@ -48,12 +49,9 @@ object MessageUtils {
                         .styled {
                             if (results.page > 1) {
                                 it.withHoverEvent(
-                                    HoverEvent(
-                                        HoverEvent.Action.SHOW_TEXT,
-                                        Text.translatable("text.ledger.footer.page_backward.hover")
-                                    )
+                                    HoverEvent.ShowText(Text.translatable("text.ledger.footer.page_backward.hover"))
                                 ).withClickEvent(
-                                    ClickEvent(ClickEvent.Action.RUN_COMMAND, "/lg pg ${results.page - 1}")
+                                    ClickEvent.RunCommand("/lg pg ${results.page - 1}")
                                 )
                             } else {
                                 Style.EMPTY
@@ -65,12 +63,9 @@ object MessageUtils {
                         .styled {
                             if (results.page < results.pages) {
                                 it.withHoverEvent(
-                                    HoverEvent(
-                                        HoverEvent.Action.SHOW_TEXT,
-                                        Text.translatable("text.ledger.footer.page_forward.hover")
-                                    )
+                                    HoverEvent.ShowText(Text.translatable("text.ledger.footer.page_forward.hover"))
                                 ).withClickEvent(
-                                    ClickEvent(ClickEvent.Action.RUN_COMMAND, "/lg pg ${results.page + 1}")
+                                    ClickEvent.RunCommand("/lg pg ${results.page + 1}")
                                 )
                             } else {
                                 Style.EMPTY
@@ -129,12 +124,7 @@ object MessageUtils {
         val timeMessage = formatter.format(time.atZone(Ledger.config[SearchSpec.timeZone])).literal()
 
         message.styled {
-            it.withHoverEvent(
-                HoverEvent(
-                    HoverEvent.Action.SHOW_TEXT,
-                    timeMessage
-                )
-            )
+            it.withHoverEvent(HoverEvent.ShowText(timeMessage))
         }
         return message
     }

@@ -27,6 +27,9 @@ fun launchMain(executor: (Runnable) -> Unit, block: suspend CoroutineScope.() ->
 
 fun World.launchMain(block: suspend CoroutineScope.() -> Unit) {
     when (this) {
-        is ServerWorld -> launchMain(server::execute, block)
+        is ServerWorld -> {
+            val minecraftServer = server ?: return
+            launchMain({ runnable -> minecraftServer.execute(runnable) }, block)
+        }
     }
 }

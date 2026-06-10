@@ -1,4 +1,4 @@
-﻿package com.github.quiltservertools.ledger.database
+package com.github.quiltservertools.ledger.database
 
 import com.github.quiltservertools.ledger.Ledger
 import com.github.quiltservertools.ledger.actions.ActionType
@@ -551,14 +551,14 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
 
     override fun close() = Unit
 
-    private fun <T> getObjectId(
+    private fun <T : Any> getObjectId(
         obj: T,
         cache: Cache<T, Int>,
         table: EntityClass<Int, Entity<Int>>,
         column: Column<T>
     ): Int? = getObjectId(obj, Function.identity(), cache, table, column)
 
-    private fun <T, S> getObjectId(
+    private fun <T : Any, S> getObjectId(
         obj: T,
         mapper: Function<T, S>,
         cache: Cache<T, Int>,
@@ -571,7 +571,7 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
         }
     }
 
-    private fun <T> getOrCreateObjectId(
+    private fun <T : Any> getOrCreateObjectId(
         obj: T,
         cache: Cache<T, Int>,
         entity: IntEntityClass<*>,
@@ -580,7 +580,7 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
     ): Int =
         getOrCreateObjectId(obj, Function.identity(), cache, entity, table, column)
 
-    private fun <T, S> getOrCreateObjectId(
+    private fun <T : Any, S> getOrCreateObjectId(
         obj: T,
         mapper: Function<T, S>,
         cache: Cache<T, Int>,
@@ -680,4 +680,3 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
         return Tables.Player.wrapRows(query).toList().map { PlayerResult.fromRow(it) }
     }
 }
-

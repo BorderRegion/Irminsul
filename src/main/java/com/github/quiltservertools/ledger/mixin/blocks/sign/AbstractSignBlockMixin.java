@@ -57,7 +57,7 @@ public class AbstractSignBlockMixin {
         DynamicRegistryManager registryManager = world.getRegistryManager();
 
         // a bad hack to copy the old sign block entity for rollbacks
-        @Nullable BlockEntity oldSignEntity = BlockEntity.createFromNbt(pos, state, signBlockEntity.createNbtWithId(registryManager), registryManager);
+        @Nullable BlockEntity oldSignEntity = BlockEntity.createFromNbt(pos, state, signBlockEntity.createNbtWithIdentifyingData(registryManager), registryManager);
 
         boolean result = original.call(instance, world, signBlockEntity, front, player);
         if (result && oldSignEntity != null) {

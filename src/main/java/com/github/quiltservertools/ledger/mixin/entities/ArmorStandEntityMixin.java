@@ -2,6 +2,7 @@ package com.github.quiltservertools.ledger.mixin.entities;
 
 import com.github.quiltservertools.ledger.callbacks.EntityKillCallback;
 import com.github.quiltservertools.ledger.callbacks.EntityModifyCallback;
+import com.github.quiltservertools.ledger.utility.NbtUtils;
 import com.github.quiltservertools.ledger.utility.Sources;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
@@ -29,7 +30,7 @@ public abstract class ArmorStandEntityMixin {
     @Inject(method = "equip", at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/decoration/ArmorStandEntity;equipStack(Lnet/minecraft/entity/EquipmentSlot;Lnet/minecraft/item/ItemStack;)V"))
     private void legerLogOldEntity(PlayerEntity player, EquipmentSlot slot, ItemStack playerStack, Hand hand, CallbackInfoReturnable<Boolean> cir) {
         LivingEntity entity = (LivingEntity) (Object) this;
-        this.oldEntityTags = entity.writeNbt(new NbtCompound());
+        this.oldEntityTags = NbtUtils.entityToNbt(entity);
         this.oldEntityStack = entity.getEquippedStack(slot);
     }
 
@@ -37,22 +38,22 @@ public abstract class ArmorStandEntityMixin {
     private void ledgerArmorStandInteract(PlayerEntity player, EquipmentSlot slot, ItemStack playerStack, Hand hand, CallbackInfoReturnable<Boolean> cir) {
         LivingEntity entity = (LivingEntity) (Object) this;
         if (!oldEntityStack.isEmpty()) {
-            EntityModifyCallback.EVENT.invoker().modify(player.getWorld(), entity.getBlockPos(), oldEntityTags, entity, oldEntityStack, player, Sources.REMOVE);
+            EntityModifyCallback.EVENT.invoker().modify(player.getEntityWorld(), entity.getBlockPos(), oldEntityTags, entity, oldEntityStack, player, Sources.REMOVE);
         }
         if (!playerStack.isEmpty()) {
-            EntityModifyCallback.EVENT.invoker().modify(player.getWorld(), entity.getBlockPos(), oldEntityTags, entity, playerStack, player, Sources.EQUIP);
+            EntityModifyCallback.EVENT.invoker().modify(player.getEntityWorld(), entity.getBlockPos(), oldEntityTags, entity, playerStack, player, Sources.EQUIP);
         }
     }
 
-    @Inject(method = "updateHealth", at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/decoration/ArmorStandEntity;kill()V"))
+    @Inject(method = "updateHealth", at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/decoration/ArmorStandEntity;kill(Lnet/minecraft/server/world/ServerWorld;)V"))
     private void ledgerArmorStandKill(ServerWorld world, DamageSource damageSource, float amount, CallbackInfo ci) {
         LivingEntity entity = (LivingEntity) (Object) this;
-        EntityKillCallback.EVENT.invoker().kill(entity.getWorld(), entity.getBlockPos(), entity, damageSource);
+        EntityKillCallback.EVENT.invoker().kill(entity.getEntityWorld(), entity.getBlockPos(), entity, damageSource);
     }
 
-    @Inject(method = "damage", at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/decoration/ArmorStandEntity;kill()V"))
-    private void ledgerArmorStandKill(DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
+    @Inject(method = "damage", at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/decoration/ArmorStandEntity;kill(Lnet/minecraft/server/world/ServerWorld;)V"))
+    private void ledgerArmorStandKill(ServerWorld world, DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
         LivingEntity entity = (LivingEntity) (Object) this;
-        EntityKillCallback.EVENT.invoker().kill(entity.getWorld(), entity.getBlockPos(), entity, source);
+        EntityKillCallback.EVENT.invoker().kill(entity.getEntityWorld(), entity.getBlockPos(), entity, source);
     }
 }

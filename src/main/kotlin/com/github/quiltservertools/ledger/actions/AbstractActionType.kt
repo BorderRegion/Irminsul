@@ -75,12 +75,7 @@ abstract class AbstractActionType : ActionType {
 
     open fun getActionMessage(): Text = Text.translatable("text.ledger.action.$identifier")
         .styled {
-            it.withHoverEvent(
-                HoverEvent(
-                    HoverEvent.Action.SHOW_TEXT,
-                    identifier.literal()
-                )
-            )
+            it.withHoverEvent(HoverEvent.ShowText(identifier.literal()))
         }
 
     open fun getObjectMessage(source: ServerCommandSource): Text = Text.translatable(
@@ -89,28 +84,19 @@ abstract class AbstractActionType : ActionType {
             objectIdentifier
         )
     ).setStyle(TextColorPallet.secondaryVariant).styled {
-        it.withHoverEvent(
-            HoverEvent(
-                HoverEvent.Action.SHOW_TEXT,
-                objectIdentifier.toString().literal()
-            )
-        )
+        it.withHoverEvent(HoverEvent.ShowText(objectIdentifier.toString().literal()))
     }
 
     open fun getLocationMessage(): Text = "${pos.x} ${pos.y} ${pos.z}".literal()
         .setStyle(TextColorPallet.secondary)
         .styled {
             it.withHoverEvent(
-                HoverEvent(
-                    HoverEvent.Action.SHOW_TEXT,
+                HoverEvent.ShowText(
                     Text.literal(world?.let { "$it\n" } ?: "")
                         .append(Text.translatable("text.ledger.action_message.location.hover"))
                 )
             ).withClickEvent(
-                ClickEvent(
-                    ClickEvent.Action.RUN_COMMAND,
-                    "/lg tp ${world ?: World.OVERWORLD.value} ${pos.x} ${pos.y} ${pos.z}"
-                )
+                ClickEvent.RunCommand("/lg tp ${world ?: World.OVERWORLD.value} ${pos.x} ${pos.y} ${pos.z}")
             )
         }
 }

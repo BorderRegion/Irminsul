@@ -9,6 +9,7 @@ import com.github.quiltservertools.ledger.commands.parameters.RollbackStatusPara
 import com.github.quiltservertools.ledger.commands.parameters.SimpleParameter
 import com.github.quiltservertools.ledger.commands.parameters.SourceParameter
 import com.github.quiltservertools.ledger.commands.parameters.TimeParameter
+import com.github.quiltservertools.ledger.database.DatabaseManager
 import com.github.quiltservertools.ledger.utility.Negatable
 import com.google.common.collect.HashMultimap
 import com.mojang.brigadier.LiteralMessage
@@ -96,7 +97,7 @@ object SearchParamArgument {
                     .create()
             val value =
                 if (parameter is NegatableParameter) parameter.parseNegatable(reader) else parameter.parse(reader)
-            result.put(propertyName, value)
+            if (value != null) result.put(propertyName, value)
         }
 
         val builder = ActionSearchParams.Builder()
@@ -132,8 +133,13 @@ object SearchParamArgument {
                 }
                 "source" -> {
                     val sourceInput = value as Negatable<String>
-                    if (sourceInput.property.startsWith('@')) {
-                        val nonPlayer = Negatable(sourceInput.property.trim('@'), sourceInput.allowed)
+                    val sourceName = sourceInput.property.trim('@')
+                    val profile = source.server.playerManager.getPlayer(sourceInput.property)?.gameProfile
+
+                    if (sourceInput.property.startsWith('@') ||
+                        profile == null && DatabaseManager.getKnownSources().contains(sourceName)
+                    ) {
+                        val nonPlayer = Negatable(sourceName, sourceInput.allowed)
                         if (builder.sourceNames == null) {
                             builder.sourceNames =
                                 mutableSetOf(nonPlayer)
@@ -141,18 +147,15 @@ object SearchParamArgument {
                             builder.sourceNames!!.add(nonPlayer)
                         }
                     } else {
-                        val profile = source.server.userCache?.findByName(sourceInput.property)
-                        // If the player doesn't exist use a random UUID to make the query not match
-                        val id = profile?.orElse(null)?.id ?: UUID.randomUUID()
+                        // If the player isn't online use a random UUID to make the query not match
+                        val id = profile?.id ?: UUID.randomUUID()
 
-                        if (id != null) {
-                            val playerIdEntry = Negatable(id, sourceInput.allowed)
-                            if (builder.sourcePlayerIds == null) {
-                                builder.sourcePlayerIds =
-                                    mutableSetOf(playerIdEntry)
-                            } else {
-                                builder.sourcePlayerIds!!.add(playerIdEntry)
-                            }
+                        val playerIdEntry = Negatable(id, sourceInput.allowed)
+                        if (builder.sourcePlayerIds == null) {
+                            builder.sourcePlayerIds =
+                                mutableSetOf(playerIdEntry)
+                        } else {
+                            builder.sourcePlayerIds!!.add(playerIdEntry)
                         }
                     }
                 }

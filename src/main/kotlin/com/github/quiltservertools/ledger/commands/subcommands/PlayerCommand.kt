@@ -10,6 +10,7 @@ import com.mojang.authlib.GameProfile
 import kotlinx.coroutines.launch
 import me.lucko.fabric.api.permissions.v0.Permissions
 import net.minecraft.command.argument.GameProfileArgumentType
+import net.minecraft.server.PlayerConfigEntry
 import net.minecraft.server.command.CommandManager.argument
 import net.minecraft.server.command.CommandManager.literal
 import net.minecraft.server.command.ServerCommandSource
@@ -27,9 +28,9 @@ object PlayerCommand : BuildableCommand {
             .build()
     }
 
-    private fun lookupPlayer(profiles: MutableCollection<GameProfile>, source: ServerCommandSource): Int {
+    private fun lookupPlayer(profiles: MutableCollection<PlayerConfigEntry>, source: ServerCommandSource): Int {
         Ledger.launch {
-            val players = DatabaseManager.searchPlayers(profiles.toSet())
+            val players = DatabaseManager.searchPlayers(profiles.map { GameProfile(it.id(), it.name()) }.toSet())
             MessageUtils.sendPlayerMessage(source, players)
         }
 

@@ -93,10 +93,10 @@ object ActionFactory {
         action.world = world.registryKey.value
         action.objectIdentifier = Registries.BLOCK.getId(state.block)
         action.oldObjectIdentifier = Registries.BLOCK.getId(oldState.block)
-        action.objectState = NbtUtils.blockStateToProperties(state)?.asString()
-        action.oldObjectState = NbtUtils.blockStateToProperties(oldState)?.asString()
+        action.objectState = NbtUtils.toString(NbtUtils.blockStateToProperties(state))
+        action.oldObjectState = NbtUtils.toString(NbtUtils.blockStateToProperties(oldState))
         action.sourceName = source
-        action.extraData = entity?.createNbt(world.registryManager)?.asString()
+        action.extraData = NbtUtils.toString(entity?.createNbt(world.registryManager))
     }
 
     fun itemInsertAction(world: World, stack: ItemStack, pos: BlockPos, source: String): ItemInsertActionType {
@@ -144,10 +144,11 @@ object ActionFactory {
         source: PlayerEntity
     ): ItemPickUpActionType {
         val action = ItemPickUpActionType()
+        val entityWorld = entity.entityWorld
 
-        setItemData(action, entity.blockPos, entity.world, entity.stack, Sources.PLAYER)
+        setItemData(action, entity.blockPos, entityWorld, entity.stack, Sources.PLAYER)
 
-        action.oldObjectState = entity.writeNbt(NbtCompound())?.asString()
+        action.oldObjectState = NbtUtils.toString(NbtUtils.entityToNbt(entity, entityWorld.registryManager))
         action.sourceProfile = source.gameProfile
 
         return action
@@ -158,10 +159,11 @@ object ActionFactory {
         source: PlayerEntity
     ): ItemDropActionType {
         val action = ItemDropActionType()
+        val entityWorld = entity.entityWorld
 
-        setItemData(action, entity.blockPos, entity.world, entity.stack, Sources.PLAYER)
+        setItemData(action, entity.blockPos, entityWorld, entity.stack, Sources.PLAYER)
 
-        action.objectState = entity.writeNbt(NbtCompound())?.asString()
+        action.objectState = NbtUtils.toString(NbtUtils.entityToNbt(entity, entityWorld.registryManager))
         action.sourceProfile = source.gameProfile
 
         return action
@@ -193,7 +195,7 @@ object ActionFactory {
         action.world = world.registryKey.value
         action.objectIdentifier = Registries.ITEM.getId(stack.item)
         action.sourceName = source
-        action.extraData = stack.encode(world.registryManager)?.asString()
+        action.extraData = NbtUtils.toString(NbtUtils.itemToNbt(stack, world.registryManager))
     }
 
     fun entityKillAction(world: World, pos: BlockPos, entity: Entity, cause: DamageSource): EntityKillActionType {
@@ -228,7 +230,7 @@ object ActionFactory {
         action.world = world.registryKey.value
         action.objectIdentifier = Registries.ENTITY_TYPE.getId(entity.type)
         action.sourceName = source
-        action.extraData = entity.writeNbt(NbtCompound())?.asString()
+        action.extraData = NbtUtils.toString(NbtUtils.entityToNbt(entity, world.registryManager))
     }
 
     fun entityChangeAction(
@@ -248,10 +250,10 @@ object ActionFactory {
         action.oldObjectIdentifier = Registries.ENTITY_TYPE.getId(entity.type)
 
         if (itemStack != null) {
-            action.extraData = itemStack.encode(world.registryManager)?.asString()
+            action.extraData = NbtUtils.toString(NbtUtils.itemToNbt(itemStack, world.registryManager))
         }
-        action.oldObjectState = oldEntityTags.asString()
-        action.objectState = entity.writeNbt(NbtCompound())?.asString()
+        action.oldObjectState = oldEntityTags.toString()
+        action.objectState = NbtUtils.toString(NbtUtils.entityToNbt(entity, world.registryManager))
         action.sourceName = sourceType
 
         if (entityActor is PlayerEntity) {

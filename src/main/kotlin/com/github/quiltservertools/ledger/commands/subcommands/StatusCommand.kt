@@ -17,6 +17,7 @@ import net.fabricmc.loader.api.SemanticVersion
 import net.minecraft.server.command.CommandManager
 import net.minecraft.text.ClickEvent
 import net.minecraft.text.Text
+import java.net.URI
 
 object StatusCommand : BuildableCommand {
     override fun build(): LiteralNode =
@@ -40,12 +41,12 @@ object StatusCommand : BuildableCommand {
                     Text.translatable(
                         "text.ledger.status.queue",
                         (
-                                "${ActionQueueService.pending} " +
-                                        "(memory=${ActionQueueService.size}, " +
-                                        "spillBytes=${ActionQueueService.spillPendingBytes}, " +
-                                        "${ActionQueueService.spilled} spilled, " +
-                                        "${ActionQueueService.dropped} dropped)"
-                                ).literal()
+                            "${ActionQueueService.pending} " +
+                                "(memory=${ActionQueueService.size}, " +
+                                "spillBytes=${ActionQueueService.spillPendingBytes}, " +
+                                "${ActionQueueService.spilled} spilled, " +
+                                "${ActionQueueService.dropped} dropped)"
+                            ).literal()
                             .setStyle(TextColorPallet.secondaryVariant)
                     ).setStyle(TextColorPallet.secondary)
                 },
@@ -78,12 +79,7 @@ object StatusCommand : BuildableCommand {
                         "text.ledger.status.discord.join".translate()
                             .setStyle(TextColorPallet.secondaryVariant)
                             .styled {
-                                it.withClickEvent(
-                                    ClickEvent(
-                                        ClickEvent.Action.OPEN_URL,
-                                        "https://discord.gg/FpRNYrQaGP"
-                                    )
-                                )
+                                it.withClickEvent(ClickEvent.OpenUrl(URI.create("https://discord.gg/FpRNYrQaGP")))
                             }
                     ).setStyle(TextColorPallet.secondary)
                 },
@@ -97,9 +93,8 @@ object StatusCommand : BuildableCommand {
                             .setStyle(TextColorPallet.secondaryVariant)
                             .styled {
                                 it.withClickEvent(
-                                    ClickEvent(
-                                        ClickEvent.Action.OPEN_URL,
-                                        "https://quiltservertools.github.io/Ledger/latest/"
+                                    ClickEvent.OpenUrl(
+                                        URI.create("https://quiltservertools.github.io/Ledger/latest/")
                                     )
                                 )
                             }

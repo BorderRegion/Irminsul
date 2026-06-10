@@ -1,0 +1,77 @@
+name: GitHub Beta Release
+
+on:
+    push:
+        tags:
+            - 'irminsul-*'
+
+permissions:
+    contents: write
+
+jobs:
+    release:
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Set up JDK 21
+              uses: actions/setup-java@v4
+              with:
+                  java-version: 21
+                  distribution: 'temurin'
+
+            - name: Build release artifacts
+              run: ./gradlew build
+
+            - name: Prepare release assets
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  mkdir -p release-assets
+                  for file in build/libs/*.jar; do
+                      name="$(basename "$file")"
+                      cp "$file" "release-assets/${name/#ledger-/irminsul-}"
+                  done
+
+            - name: Write release notes
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  mc_version="$(sed -n 's/^minecraft = "\(.*\)"/\1/p' libs.versions.toml | head -n 1)"
+                  loader_version="$(sed -n 's/^fabric-loader = "\(.*\)"/\1/p' libs.versions.toml | head -n 1)"
+                  api_version="$(sed -n 's/^fabric-api = "\(.*\)"/\1/p' libs.versions.toml | head -n 1)"
+                  kotlin_version="$(sed -n 's/^fabric-kotlin = "\(.*\)"/\1/p' libs.versions.toml | head -n 1)"
+                  cat > RELEASE_NOTES.md <<EOF
+                  # Irminsul ${GITHUB_REF_NAME} Beta
+
+                  This is a beta/test build. Use it on a test server, mirrored world, or staged rollout first. Keep world and Ledger data backups before testing rollback or high-volume logging.
+
+                  ## Compatibility
+
+                  - Minecraft: ${mc_version}
+                  - Fabric Loader: ${loader_version} or newer
+                  - Fabric API: ${api_version} or newer
+                  - Fabric Language Kotlin: ${kotlin_version} or newer
+
+                  ## Notes
+
+                  - Irminsul is an experimental Ledger fork with a local append-only backend.
+                  - Enable the backend with \`engine = "irminsul"\` in \`config/ledger.toml\`.
+                  - The default Irminsul data directory is \`world/ledger-irminsul\`.
+                  - This release is not recommended for an important production server without tested backups and a rollback plan.
+                  EOF
+
+            - name: Publish GitHub prerelease
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  title="Irminsul ${GITHUB_REF_NAME} Beta"
+                  if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+                      gh release edit "${GITHUB_REF_NAME}" --title "$title" --notes-file RELEASE_NOTES.md --prerelease
+                      gh release upload "${GITHUB_REF_NAME}" release-assets/*.jar --clobber
+                  else
+                      gh release create "${GITHUB_REF_NAME}" release-assets/*.jar --title "$title" --notes-file RELEASE_NOTES.md --prerelease
+                  fi

@@ -7,12 +7,13 @@ import com.github.quiltservertools.ledger.utility.Sources;
 import com.llamalad7.mixinextras.sugar.Local;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Waterloggable;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.fluid.Fluid;
 import net.minecraft.item.BucketItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.Hand;
-import net.minecraft.util.TypedActionResult;
+import net.minecraft.util.ActionResult;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -31,15 +32,17 @@ public abstract class BucketItemMixin {
     private Fluid fluid;
 
     @Inject(method = "placeFluid", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/World;breakBlock(Lnet/minecraft/util/math/BlockPos;Z)Z"))
-    private void logFluidBreak(@Nullable PlayerEntity player, World world, BlockPos pos, @Nullable BlockHitResult hitResult, CallbackInfoReturnable<Boolean> cir) {
+    private void logFluidBreak(@Nullable LivingEntity entity, World world, BlockPos pos, @Nullable BlockHitResult hitResult, CallbackInfoReturnable<Boolean> cir) {
+        PlayerEntity player = entity instanceof PlayerEntity playerEntity ? playerEntity : null;
         var blockstate = world.getBlockState(pos);
         if (!blockstate.isAir()) {
             BlockBreakCallback.EVENT.invoker().breakBlock(world, pos, world.getBlockState(pos), world.getBlockEntity(pos), Sources.FLUID, player);
         }
     }
     
-    @Inject(method = "placeFluid", at = @At(value = "INVOKE", target = "Lnet/minecraft/item/BucketItem;playEmptyingSound(Lnet/minecraft/entity/player/PlayerEntity;Lnet/minecraft/world/WorldAccess;Lnet/minecraft/util/math/BlockPos;)V", ordinal = 1))
-    private void logFluidPlace(@Nullable PlayerEntity player, World world, BlockPos pos, @Nullable BlockHitResult hitResult, CallbackInfoReturnable<Boolean> cir) {
+    @Inject(method = "placeFluid", at = @At(value = "INVOKE", target = "Lnet/minecraft/item/BucketItem;playEmptyingSound(Lnet/minecraft/entity/LivingEntity;Lnet/minecraft/world/WorldAccess;Lnet/minecraft/util/math/BlockPos;)V", ordinal = 1))
+    private void logFluidPlace(@Nullable LivingEntity entity, World world, BlockPos pos, @Nullable BlockHitResult hitResult, CallbackInfoReturnable<Boolean> cir) {
+        PlayerEntity player = entity instanceof PlayerEntity playerEntity ? playerEntity : null;
         if (player != null) {
             BlockPlaceCallback.EVENT.invoker().place(world, pos, this.fluid.getDefaultState().getBlockState(), null, player);
         } else {
@@ -47,8 +50,9 @@ public abstract class BucketItemMixin {
         }
     }
 
-    @Inject(method = "placeFluid", at = @At(value = "INVOKE", target = "Lnet/minecraft/item/BucketItem;playEmptyingSound(Lnet/minecraft/entity/player/PlayerEntity;Lnet/minecraft/world/WorldAccess;Lnet/minecraft/util/math/BlockPos;)V", ordinal = 0))
-    private void logWaterlog(PlayerEntity player, World world, BlockPos pos, BlockHitResult hitResult, CallbackInfoReturnable<Boolean> cir, @Local BlockState blockState) {
+    @Inject(method = "placeFluid", at = @At(value = "INVOKE", target = "Lnet/minecraft/item/BucketItem;playEmptyingSound(Lnet/minecraft/entity/LivingEntity;Lnet/minecraft/world/WorldAccess;Lnet/minecraft/util/math/BlockPos;)V", ordinal = 0))
+    private void logWaterlog(LivingEntity entity, World world, BlockPos pos, BlockHitResult hitResult, CallbackInfoReturnable<Boolean> cir, @Local BlockState blockState) {
+        PlayerEntity player = entity instanceof PlayerEntity playerEntity ? playerEntity : null;
         if (player != null) {
             BlockChangeCallback.EVENT.invoker().changeBlock(
                     world,
@@ -73,7 +77,7 @@ public abstract class BucketItemMixin {
     }
 
     @Inject(method = "use", at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/player/PlayerEntity;incrementStat(Lnet/minecraft/stat/Stat;)V", ordinal = 0))
-    private void logFluidPickup(World world, PlayerEntity player, Hand hand, CallbackInfoReturnable<TypedActionResult<ItemStack>> cir, @Local(ordinal = 0) BlockPos pos, @Local BlockState blockState) {
+    private void logFluidPickup(World world, PlayerEntity player, Hand hand, CallbackInfoReturnable<ActionResult> cir, @Local(ordinal = 0) BlockPos pos, @Local BlockState blockState) {
         if (blockState.getBlock() instanceof Waterloggable) {
             BlockChangeCallback.EVENT.invoker().changeBlock(
                     world,

@@ -38,6 +38,7 @@ public abstract class FillCommandMixin {
             BlockStateArgument block,
             @Coerce Object mode,
             Predicate<CachedBlockPosition> filter,
+            boolean strict,
             CallbackInfoReturnable<Integer> cir,
             @Local BlockPos pos) {
         ServerWorld world = source.getWorld();

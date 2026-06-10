@@ -6,11 +6,7 @@ import com.github.quiltservertools.ledger.utility.UUID
 import com.github.quiltservertools.ledger.utility.getWorld
 import com.github.quiltservertools.ledger.utility.literal
 import net.minecraft.entity.Entity
-import net.minecraft.entity.EntityType
-import net.minecraft.entity.ItemEntity
-import net.minecraft.item.AliasedBlockItem
 import net.minecraft.item.BlockItem
-import net.minecraft.nbt.StringNbtReader
 import net.minecraft.registry.Registries
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.command.ServerCommandSource
@@ -23,7 +19,7 @@ open class ItemDropActionType : AbstractActionType() {
 
     override fun getTranslationType(): String {
         val item = Registries.ITEM.get(objectIdentifier)
-        return if (item is BlockItem && item !is AliasedBlockItem) {
+        return if (item is BlockItem) {
             "block"
         } else {
             "item"
@@ -47,20 +43,15 @@ open class ItemDropActionType : AbstractActionType() {
                 )
             )
         ).setStyle(TextColorPallet.secondaryVariant).styled {
-            it.withHoverEvent(
-                HoverEvent(
-                    HoverEvent.Action.SHOW_ITEM,
-                    HoverEvent.ItemStackContent(stack)
-                )
-            )
+            it.withHoverEvent(HoverEvent.ShowItem(stack))
         }
     }
 
     override fun rollback(server: MinecraftServer): Boolean {
         val world = server.getWorld(world)
 
-        val newEntity = StringNbtReader.parse(objectState)
-        val uuid = newEntity!!.getUuid(UUID) ?: return false
+        val newEntity = NbtUtils.readCompound(objectState)
+        val uuid = NbtUtils.getUuid(newEntity, UUID) ?: return false
         val entity = world?.getEntity(uuid)
 
         if (entity != null) {
@@ -71,16 +62,14 @@ open class ItemDropActionType : AbstractActionType() {
     }
 
     override fun restore(server: MinecraftServer): Boolean {
-        val world = server.getWorld(world)
+        val world = server.getWorld(world) ?: return false
 
-        val newEntity = StringNbtReader.parse(objectState)
-        val uuid = newEntity!!.getUuid(UUID) ?: return false
-        val entity = world?.getEntity(uuid)
+        val newEntity = NbtUtils.readCompound(objectState)
+        val uuid = NbtUtils.getUuid(newEntity, UUID) ?: return false
+        val entity = world.getEntity(uuid)
 
         if (entity == null) {
-            val entity = ItemEntity(EntityType.ITEM, world)
-            entity.readNbt(newEntity)
-            world?.spawnEntity(entity)
+            NbtUtils.entityFromNbt(newEntity, world)?.let { world.spawnEntity(it) }
         }
         return true
     }

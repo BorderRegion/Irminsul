@@ -16,11 +16,6 @@ class BlockBreakActionType : BlockChangeActionType() {
             oldObjectIdentifier
         )
     ).setStyle(TextColorPallet.secondaryVariant).styled {
-        it.withHoverEvent(
-            HoverEvent(
-                HoverEvent.Action.SHOW_TEXT,
-                oldObjectIdentifier.toString().literal()
-            )
-        )
+        it.withHoverEvent(HoverEvent.ShowText(oldObjectIdentifier.toString().literal()))
     }
 }

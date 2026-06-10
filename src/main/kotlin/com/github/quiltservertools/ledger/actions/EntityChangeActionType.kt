@@ -1,17 +1,14 @@
 package com.github.quiltservertools.ledger.actions
 
+import com.github.quiltservertools.ledger.utility.NbtUtils
 import com.github.quiltservertools.ledger.utility.TextColorPallet
 import com.github.quiltservertools.ledger.utility.UUID
 import com.github.quiltservertools.ledger.utility.getWorld
 import com.github.quiltservertools.ledger.utility.literal
 import com.mojang.brigadier.exceptions.CommandSyntaxException
-import net.minecraft.entity.LivingEntity
-import net.minecraft.entity.decoration.AbstractDecorationEntity
 import net.minecraft.entity.decoration.ItemFrameEntity
-import net.minecraft.item.AliasedBlockItem
 import net.minecraft.item.BlockItem
 import net.minecraft.item.ItemStack
-import net.minecraft.nbt.StringNbtReader
 import net.minecraft.registry.DynamicRegistryManager
 import net.minecraft.registry.Registries
 import net.minecraft.server.MinecraftServer
@@ -26,7 +23,7 @@ class EntityChangeActionType : AbstractActionType() {
 
     override fun getTranslationType(): String {
         val item = getStack(DynamicRegistryManager.EMPTY).item
-        return if (item is BlockItem && item !is AliasedBlockItem) {
+        return if (item is BlockItem) {
             "block"
         } else {
             "item"
@@ -36,8 +33,8 @@ class EntityChangeActionType : AbstractActionType() {
     private fun getStack(registryManager: DynamicRegistryManager): ItemStack {
         if (extraData == null) return ItemStack.EMPTY
         try {
-            val itemTag = StringNbtReader.parse(extraData)
-            return ItemStack.fromNbt(registryManager, itemTag).orElse(ItemStack.EMPTY)
+            val itemTag = NbtUtils.readCompound(extraData)
+            return NbtUtils.itemFromNbt(itemTag, registryManager)
         } catch (_: CommandSyntaxException) {
             // In an earlier version of ledger extraData only stored the item id
             val item = Registries.ITEM.get(Identifier.of(extraData))
@@ -54,12 +51,7 @@ class EntityChangeActionType : AbstractActionType() {
                     objectIdentifier
                 )
             ).setStyle(TextColorPallet.secondaryVariant).styled {
-                it.withHoverEvent(
-                    HoverEvent(
-                        HoverEvent.Action.SHOW_TEXT,
-                        objectIdentifier.toString().literal()
-                    )
-                )
+                it.withHoverEvent(HoverEvent.ShowText(objectIdentifier.toString().literal()))
             }
         )
 
@@ -68,14 +60,9 @@ class EntityChangeActionType : AbstractActionType() {
             text.append(Text.literal(" ").append(Text.translatable("text.ledger.action_message.with")).append(" "))
             text.append(
                 Text.translatable(
-                    stack.translationKey
+                    stack.item.translationKey
                 ).setStyle(TextColorPallet.secondaryVariant).styled {
-                    it.withHoverEvent(
-                        HoverEvent(
-                            HoverEvent.Action.SHOW_ITEM,
-                            HoverEvent.ItemStackContent(stack)
-                        )
-                    )
+                    it.withHoverEvent(HoverEvent.ShowItem(stack))
                 }
             )
         }
@@ -83,39 +70,33 @@ class EntityChangeActionType : AbstractActionType() {
     }
 
     override fun rollback(server: MinecraftServer): Boolean {
-        val world = server.getWorld(world)
+        val world = server.getWorld(world) ?: return false
 
-        val oldEntity = StringNbtReader.parse(oldObjectState)
-        val uuid = oldEntity!!.getUuid(UUID) ?: return false
-        val entity = world?.getEntity(uuid)
+        val oldEntity = NbtUtils.readCompound(oldObjectState)
+        val uuid = NbtUtils.getUuid(oldEntity, UUID) ?: return false
+        val entity = world.getEntity(uuid)
 
         if (entity != null) {
             if (entity is ItemFrameEntity) {
                 entity.heldItemStack = ItemStack.EMPTY
             }
-            when (entity) {
-                is LivingEntity -> entity.readCustomDataFromNbt(oldEntity)
-                is AbstractDecorationEntity -> entity.readCustomDataFromNbt(oldEntity)
-            }
+            NbtUtils.readEntity(entity, oldEntity, server.registryManager)
             return true
         }
         return false
     }
 
     override fun restore(server: MinecraftServer): Boolean {
-        val world = server.getWorld(world)
-        val newEntity = StringNbtReader.parse(objectState)
-        val uuid = newEntity!!.getUuid(UUID) ?: return false
-        val entity = world?.getEntity(uuid)
+        val world = server.getWorld(world) ?: return false
+        val newEntity = NbtUtils.readCompound(objectState)
+        val uuid = NbtUtils.getUuid(newEntity, UUID) ?: return false
+        val entity = world.getEntity(uuid)
 
         if (entity != null) {
             if (entity is ItemFrameEntity) {
                 entity.heldItemStack = ItemStack.EMPTY
             }
-            when (entity) {
-                is LivingEntity -> entity.readCustomDataFromNbt(newEntity)
-                is AbstractDecorationEntity -> entity.readCustomDataFromNbt(newEntity)
-            }
+            NbtUtils.readEntity(entity, newEntity, server.registryManager)
             return true
         }
         return false
