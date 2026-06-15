@@ -26,27 +26,33 @@ object SearchCommand : BuildableCommand {
             .build()
     }
 
+    @Suppress("TooGenericExceptionCaught")
     private fun search(context: Context, params: ActionSearchParams): Int {
         val source = context.source
 
         Ledger.launch {
-            Ledger.searchCache[source.name] = params
+            try {
+                Ledger.searchCache[source.name] = params
 
-            MessageUtils.warnBusy(source)
-            val results = DatabaseManager.searchActions(params, 1)
+                MessageUtils.warnBusy(source)
+                val results = DatabaseManager.searchActions(params, 1)
 
-            if (results.actions.isEmpty()) {
-                source.sendError(Text.translatable("error.ledger.command.no_results"))
-                return@launch
+                if (results.actions.isEmpty()) {
+                    source.sendError(Text.translatable("error.ledger.command.no_results"))
+                    return@launch
+                }
+
+                MessageUtils.sendSearchResults(
+                    source,
+                    results,
+                    Text.translatable(
+                        "text.ledger.header.search"
+                    ).setStyle(TextColorPallet.primary)
+                )
+            } catch (throwable: Throwable) {
+                Ledger.logger.warn("Ledger search failed", throwable)
+                source.sendError(Text.literal(throwable.message ?: "Ledger search failed. Check server logs."))
             }
-
-            MessageUtils.sendSearchResults(
-                source,
-                results,
-                Text.translatable(
-                    "text.ledger.header.search"
-                ).setStyle(TextColorPallet.primary)
-            )
         }
 
         return 1

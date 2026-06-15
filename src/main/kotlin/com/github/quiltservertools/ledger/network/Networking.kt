@@ -14,7 +14,8 @@ import net.minecraft.server.network.ServerPlayerEntity
 object Networking {
     // List of players who have a compatible client mod
     private var networkedPlayers = mutableSetOf<ServerPlayerEntity>()
-    const val PROTOCOL_VERSION = 3
+    const val PROTOCOL_VERSION = 5
+    const val MAX_NETWORK_RESULT_PAGES = 10
 
     init {
         if (config[NetworkingSpec.networking]) {

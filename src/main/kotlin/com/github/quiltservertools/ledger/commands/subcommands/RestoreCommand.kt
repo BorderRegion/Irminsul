@@ -2,16 +2,14 @@ package com.github.quiltservertools.ledger.commands.subcommands
 
 import com.github.quiltservertools.ledger.Ledger
 import com.github.quiltservertools.ledger.actionutils.ActionSearchParams
-import com.github.quiltservertools.ledger.actionutils.RollbackExecutor
+import com.github.quiltservertools.ledger.actionutils.RollbackOperations
 import com.github.quiltservertools.ledger.commands.BuildableCommand
 import com.github.quiltservertools.ledger.commands.CommandConsts
 import com.github.quiltservertools.ledger.commands.arguments.SearchParamArgument
-import com.github.quiltservertools.ledger.database.DatabaseManager
 import com.github.quiltservertools.ledger.utility.Context
 import com.github.quiltservertools.ledger.utility.LiteralNode
 import com.github.quiltservertools.ledger.utility.MessageUtils
 import com.github.quiltservertools.ledger.utility.TextColorPallet
-import com.github.quiltservertools.ledger.utility.launchMain
 import com.github.quiltservertools.ledger.utility.literal
 import kotlinx.coroutines.launch
 import me.lucko.fabric.api.permissions.v0.Permissions
@@ -29,38 +27,38 @@ object RestoreCommand : BuildableCommand {
             .build()
     }
 
+    @Suppress("TooGenericExceptionCaught")
     fun restore(context: Context, params: ActionSearchParams): Int {
         val source = context.source
         params.ensureSpecific()
         Ledger.launch {
             MessageUtils.warnBusy(source)
-            val selection = DatabaseManager.selectRestorePlan(params)
-            val actions = selection.actions
-
-            if (actions.isEmpty()) {
-                source.sendError(Text.translatable("error.ledger.command.no_results"))
-                return@launch
-            }
-
-            source.sendFeedback(
-                {
-                    Text.translatable(
-                        "text.ledger.restore.start",
-                        selection.requestedActions.toString().literal().setStyle(TextColorPallet.secondary)
-                    ).setStyle(TextColorPallet.primary)
-                },
-                true
-            )
-
-            context.source.world.launchMain {
-                val result = RollbackExecutor.restorePaced(context.source.server, selection)
-                Ledger.logger.info(
-                    "Restore executor applied ${result.appliedActions}/${result.requestedActions} " +
-                            "selected actions after block-position dedupe"
-                )
-                Ledger.launch {
-                    DatabaseManager.restoreActions(result.successfulActionIds)
+            try {
+                val result = RollbackOperations.execute(
+                    context.source.server,
+                    params,
+                    RollbackOperations.Mode.RESTORE
+                ) { selection ->
+                    source.sendFeedback(
+                        {
+                            Text.translatable(
+                                "text.ledger.restore.start",
+                                selection.requestedActions.toString().literal().setStyle(TextColorPallet.secondary)
+                            ).setStyle(TextColorPallet.primary)
+                        },
+                        true
+                    )
                 }
+
+                if (result.requestedActions == 0) {
+                    source.sendError(Text.translatable("error.ledger.command.no_results"))
+                    return@launch
+                }
+
+                Ledger.logger.info(
+                    "Restore executor applied ${result.appliedActions}/${result.attemptedActions} world operations; " +
+                        "${result.successfulActionIds.size}/${result.requestedActions} selected action ids succeeded"
+                )
 
                 for (entry in result.failures.entries) {
                     source.sendFeedback(
@@ -76,12 +74,25 @@ object RestoreCommand : BuildableCommand {
                 source.sendFeedback(
                     {
                         Text.translatable(
-                            "text.ledger.restore.finish",
-                            selection.requestedActions
-                        ).setStyle(TextColorPallet.primary)
+                            if (result.successfulActionIds.size == result.requestedActions) {
+                                "text.ledger.restore.finish"
+                            } else {
+                                "text.ledger.restore.partial"
+                            }
+                        )
+                            .append(" ")
+                            .append(
+                                "${result.successfulActionIds.size}/${result.requestedActions}"
+                                    .literal()
+                                    .setStyle(TextColorPallet.secondary)
+                            )
+                            .setStyle(TextColorPallet.primary)
                     },
                     true
                 )
+            } catch (throwable: Throwable) {
+                Ledger.logger.warn("Ledger restore failed", throwable)
+                source.sendError(Text.literal(throwable.message ?: "Ledger restore failed. Check server logs."))
             }
         }
         return 1

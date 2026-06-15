@@ -139,6 +139,7 @@ suspend fun PlayerEntity.getInspectResults(pos: BlockPos): SearchResults {
     val source = (this as ServerPlayerEntity).commandSource
     val params = ActionSearchParams.build {
         bounds = BlockBox(pos)
+        worlds = mutableSetOf(Negatable.allow(source.world.registryKey.value))
     }
 
     Ledger.searchCache[source.name] = params

@@ -4,6 +4,7 @@ import com.github.quiltservertools.ledger.Ledger
 import com.github.quiltservertools.ledger.actionutils.SearchResults
 import com.github.quiltservertools.ledger.config.SearchSpec
 import com.github.quiltservertools.ledger.database.DatabaseManager
+import com.github.quiltservertools.ledger.network.Networking.MAX_NETWORK_RESULT_PAGES
 import com.github.quiltservertools.ledger.network.Networking.hasNetworking
 import com.github.quiltservertools.ledger.network.packet.action.ActionS2CPacket
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
@@ -26,7 +27,8 @@ object MessageUtils {
         // If the player has a Ledger compatible client, we send results as action packets rather than as chat messages
         if (source.hasPlayer() && source.playerOrThrow.hasNetworking()) {
             val player = source.playerOrThrow
-            for (n in results.page..results.pages) {
+            val lastNetworkPage = minOf(results.pages, results.page + MAX_NETWORK_RESULT_PAGES - 1)
+            for (n in results.page..lastNetworkPage) {
                 val networkResults = DatabaseManager.searchActions(results.searchParams, n)
                 networkResults.actions.forEach {
                     ServerPlayNetworking.send(player, ActionS2CPacket(it))

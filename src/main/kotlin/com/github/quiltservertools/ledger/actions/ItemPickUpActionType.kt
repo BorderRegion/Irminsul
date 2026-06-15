@@ -55,7 +55,7 @@ open class ItemPickUpActionType : AbstractActionType() {
         val entity = world.getEntity(uuid)
 
         if (entity == null) {
-            NbtUtils.entityFromNbt(oldEntity, world)?.let { world.spawnEntity(it) }
+            return NbtUtils.entityFromNbt(oldEntity, world)?.let { world.spawnEntity(it) } ?: false
         }
         return true
     }

@@ -22,10 +22,10 @@ interface LedgerStore {
     suspend fun selectRollback(params: ActionSearchParams): List<ActionType>
     suspend fun selectRestore(params: ActionSearchParams): List<ActionType>
     suspend fun selectRollbackPlan(params: ActionSearchParams): RollbackExecutor.Selection =
-        RollbackExecutor.Selection(selectRollback(params))
+        RollbackExecutor.Selection(selectRollback(params), dedupeBlockActions = params.canDedupeBlockActions())
 
     suspend fun selectRestorePlan(params: ActionSearchParams): RollbackExecutor.Selection =
-        RollbackExecutor.Selection(selectRestore(params))
+        RollbackExecutor.Selection(selectRestore(params), dedupeBlockActions = params.canDedupeBlockActions())
 
     suspend fun previewActions(params: ActionSearchParams, type: Preview.Type): List<ActionType>
     suspend fun logActionBatch(actions: List<ActionType>)
@@ -37,6 +37,7 @@ interface LedgerStore {
     suspend fun restoreActions(actionIds: Set<Int>)
     suspend fun purgeActions(params: ActionSearchParams)
     suspend fun searchPlayers(players: Set<GameProfile>): List<PlayerResult>
+    fun getKnownPlayerIdsByName(name: String): Set<UUID>
     fun getKnownSources(): Set<String>
     fun close()
 }

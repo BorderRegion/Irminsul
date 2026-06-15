@@ -50,21 +50,27 @@ object PreviewCommand : BuildableCommand {
             .build()
     }
 
+    @Suppress("TooGenericExceptionCaught")
     private fun preview(context: Context, params: ActionSearchParams, type: Preview.Type): Int {
         val source = context.source
         val player = source.playerOrThrow
         params.ensureSpecific()
         Ledger.launch {
-            MessageUtils.warnBusy(source)
-            val actions = DatabaseManager.previewActions(params, type)
+            try {
+                MessageUtils.warnBusy(source)
+                val actions = DatabaseManager.previewActions(params, type)
 
-            if (actions.isEmpty()) {
-                source.sendError(Text.translatable("error.ledger.command.no_results"))
-                return@launch
+                if (actions.isEmpty()) {
+                    source.sendError(Text.translatable("error.ledger.command.no_results"))
+                    return@launch
+                }
+
+                Ledger.previewCache[player.uuid]?.cancel(player)
+                Ledger.previewCache[player.uuid] = Preview(params, actions, player, type)
+            } catch (throwable: Throwable) {
+                Ledger.logger.warn("Ledger preview failed", throwable)
+                source.sendError(Text.literal(throwable.message ?: "Ledger preview failed. Check server logs."))
             }
-
-            Ledger.previewCache[player.uuid]?.cancel(player)
-            Ledger.previewCache[player.uuid] = Preview(params, actions, player, type)
         }
         return 1
     }

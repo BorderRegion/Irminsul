@@ -42,20 +42,8 @@ object DatabaseManager {
     suspend fun countActions(params: ActionSearchParams): Long =
         store.countActions(params)
 
-    suspend fun rollbackActions(params: ActionSearchParams): List<ActionType> {
-        val actions = store.selectRollback(params)
-        store.rollbackActions(actions.mapTo(HashSet()) { it.id })
-        return actions
-    }
-
     suspend fun rollbackActions(actionIds: Set<Int>) =
         store.rollbackActions(actionIds)
-
-    suspend fun restoreActions(params: ActionSearchParams): List<ActionType> {
-        val actions = store.selectRestore(params)
-        store.restoreActions(actions.mapTo(HashSet()) { it.id })
-        return actions
-    }
 
     suspend fun restoreActions(actionIds: Set<Int>) =
         store.restoreActions(actionIds)
@@ -95,6 +83,9 @@ object DatabaseManager {
 
     suspend fun searchPlayers(players: Set<GameProfile>): List<PlayerResult> =
         store.searchPlayers(players)
+
+    fun getKnownPlayerIdsByName(name: String): Set<UUID> =
+        store.getKnownPlayerIdsByName(name)
 
     fun getKnownSources(): Set<String> =
         store.getKnownSources()

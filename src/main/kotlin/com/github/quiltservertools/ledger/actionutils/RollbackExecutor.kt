@@ -23,14 +23,18 @@ object RollbackExecutor {
         val actions: List<ActionType>,
         val actionIdsByRepresentative: Map<Int, List<Int>> = emptyMap(),
         val expectedActionByRepresentative: Map<Int, ActionType> = emptyMap(),
-        val requestedActions: Int = actions.size
+        val requestedActions: Int = actions.size,
+        val dedupeBlockActions: Boolean = true
     )
 
     data class Result(
         val successfulActionIds: Set<Int>,
         val failures: Map<String, Int>,
         val requestedActions: Int,
-        val appliedActions: Int
+        val appliedActions: Int,
+        val attemptedActions: Int,
+        val failedActionIds: Set<Int> = emptySet(),
+        val failedActions: List<ActionType> = emptyList()
     )
 
     fun rollback(server: MinecraftServer, actions: List<ActionType>): Result =
@@ -73,7 +77,10 @@ object RollbackExecutor {
         val pacing = RollbackPacing.fromConfig()
         val successfulActionIds = HashSet<Int>()
         val failures = HashMap<String, Int>()
+        val failedActionIds = HashSet<Int>()
+        val failedActions = ArrayList<ActionType>()
         var appliedActions = 0
+        var attemptedActions = 0
         var scannedActionsThisTick = 0
         var tickStartedNanos = System.nanoTime()
         var loggedFailures = 0
@@ -99,11 +106,14 @@ object RollbackExecutor {
             if (!ok && loggedFailures < MAX_FAILURE_LOGS) loggedFailures += 1
 
             scannedActionsThisTick += 1
-            appliedActions += 1
+            attemptedActions += 1
             if (ok) {
+                appliedActions += 1
                 successfulActionIds.addAll(prepared.successfulIdsFor(action))
             } else {
                 failures[action.identifier] = failures.getOrPut(action.identifier) { 0 } + 1
+                failedActionIds.addAll(prepared.actionIdsFor(action))
+                failedActions.add(action)
             }
 
             if (pacing.shouldYield(scannedActionsThisTick, tickStartedNanos)) {
@@ -117,22 +127,33 @@ object RollbackExecutor {
             successfulActionIds = successfulActionIds,
             failures = failures,
             requestedActions = prepared.requestedActions,
-            appliedActions = appliedActions
+            appliedActions = appliedActions,
+            attemptedActions = attemptedActions,
+            failedActionIds = failedActionIds,
+            failedActions = failedActions
         )
     }
 
     private fun prepare(selection: Selection): PreparedSelection {
+        if (!selection.dedupeBlockActions) {
+            return PreparedSelection(
+                actions = selection.actions,
+                actionIdsByRepresentative = emptyMap(),
+                requestedActions = selection.requestedActions
+            )
+        }
+
         if (selection.actionIdsByRepresentative.isNotEmpty()) {
             return PreparedSelection(
                 actions = selection.actions,
-            actionIdsByRepresentative = selection.actionIdsByRepresentative
-                .mapValues { it.value.toList() },
-            expectedActionByRepresentative = selection.expectedActionByRepresentative
-                .mapNotNull { (id, action) -> (action as? BlockChangeActionType)?.let { id to it } }
-                .toMap(),
-            requestedActions = selection.requestedActions
-        )
-    }
+                actionIdsByRepresentative = selection.actionIdsByRepresentative
+                    .mapValues { it.value.toList() },
+                expectedActionByRepresentative = selection.expectedActionByRepresentative
+                    .mapNotNull { (id, action) -> (action as? BlockChangeActionType)?.let { id to it } }
+                    .toMap(),
+                requestedActions = selection.requestedActions
+            )
+        }
 
         val actions = selection.actions
         val blockGroups = LinkedHashMap<BlockKey, BlockActionGroup>()
@@ -170,7 +191,10 @@ object RollbackExecutor {
     private fun executePrepared(server: MinecraftServer, prepared: PreparedSelection, mode: Mode): Result {
         val successfulActionIds = HashSet<Int>()
         val failures = HashMap<String, Int>()
+        val failedActionIds = HashSet<Int>()
+        val failedActions = ArrayList<ActionType>()
         var appliedActions = 0
+        var attemptedActions = 0
         var loggedFailures = 0
 
         for (action in prepared.actions) {
@@ -184,11 +208,14 @@ object RollbackExecutor {
                 prepared.expectedActionFor(action)
             )
             if (!ok && loggedFailures < MAX_FAILURE_LOGS) loggedFailures += 1
-            appliedActions += 1
+            attemptedActions += 1
             if (ok) {
+                appliedActions += 1
                 successfulActionIds.addAll(prepared.successfulIdsFor(action))
             } else {
                 failures[action.identifier] = failures.getOrPut(action.identifier) { 0 } + 1
+                failedActionIds.addAll(prepared.actionIdsFor(action))
+                failedActions.add(action)
             }
         }
 
@@ -196,7 +223,10 @@ object RollbackExecutor {
             successfulActionIds = successfulActionIds,
             failures = failures,
             requestedActions = prepared.requestedActions,
-            appliedActions = appliedActions
+            appliedActions = appliedActions,
+            attemptedActions = attemptedActions,
+            failedActionIds = failedActionIds,
+            failedActions = failedActions
         )
     }
 
@@ -266,6 +296,9 @@ object RollbackExecutor {
                     action.id !in actionIdsByRepresentative
 
         fun successfulIdsFor(action: ActionType): List<Int> =
+            actionIdsFor(action)
+
+        fun actionIdsFor(action: ActionType): List<Int> =
             actionIdsByRepresentative[action.id] ?: listOf(action.id)
 
         fun expectedActionFor(action: ActionType): BlockChangeActionType? =

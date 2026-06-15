@@ -22,27 +22,33 @@ object PageCommand : BuildableCommand {
             )
             .build()
 
+    @Suppress("TooGenericExceptionCaught")
     private fun page(context: Context, page: Int): Int {
         val source = context.source
 
         val params = Ledger.searchCache[source.name]
         if (params != null) {
             Ledger.launch {
-                MessageUtils.warnBusy(source)
-                val results = DatabaseManager.searchActions(params, page)
+                try {
+                    MessageUtils.warnBusy(source)
+                    val results = DatabaseManager.searchActions(params, page)
 
-                if (results.page > results.pages) {
-                    source.sendError(Text.translatable("error.ledger.no_more_pages"))
-                    return@launch
+                    if (results.page > results.pages) {
+                        source.sendError(Text.translatable("error.ledger.no_more_pages"))
+                        return@launch
+                    }
+
+                    MessageUtils.sendSearchResults(
+                        source,
+                        results,
+                        Text.translatable(
+                            "text.ledger.header.search"
+                        ).setStyle(TextColorPallet.primary)
+                    )
+                } catch (throwable: Throwable) {
+                    Ledger.logger.warn("Ledger page lookup failed", throwable)
+                    source.sendError(Text.literal(throwable.message ?: "Ledger page lookup failed. Check server logs."))
                 }
-
-                MessageUtils.sendSearchResults(
-                    source,
-                    results,
-                    Text.translatable(
-                        "text.ledger.header.search"
-                    ).setStyle(TextColorPallet.primary)
-                )
             }
 
             return 1

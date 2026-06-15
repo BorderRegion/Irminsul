@@ -34,6 +34,7 @@ import java.util.concurrent.CompletableFuture
 
 object SearchParamArgument {
     private val paramSuggesters = HashMap<String, Parameter<*>>()
+    private val unmatchedPlayerId = UUID(0L, 0L)
 
     init {
         paramSuggesters["action"] = NegatableParameter(ActionParameter())
@@ -108,7 +109,7 @@ object SearchParamArgument {
 
             when (param) {
                 "range" -> {
-                    val range = value as Int - 1
+                    val range = value as Int
                     builder.bounds = BlockBox.create(
                         BlockPos.ofFloored(source.position).subtract(Vec3i(range, range, range)),
                         BlockPos.ofFloored(source.position).add(Vec3i(range, range, range))
@@ -133,29 +134,20 @@ object SearchParamArgument {
                 }
                 "source" -> {
                     val sourceInput = value as Negatable<String>
-                    val sourceName = sourceInput.property.trim('@')
-                    val profile = source.server.playerManager.getPlayer(sourceInput.property)?.gameProfile
+                    val sourceName = sourceInput.property.trim()
 
-                    if (sourceInput.property.startsWith('@') ||
-                        profile == null && DatabaseManager.getKnownSources().contains(sourceName)
-                    ) {
-                        val nonPlayer = Negatable(sourceName, sourceInput.allowed)
-                        if (builder.sourceNames == null) {
-                            builder.sourceNames =
-                                mutableSetOf(nonPlayer)
-                        } else {
-                            builder.sourceNames!!.add(nonPlayer)
-                        }
+                    if (sourceName.startsWith('@')) {
+                        builder.addSourceName(Negatable(sourceName.trim('@'), sourceInput.allowed))
                     } else {
-                        // If the player isn't online use a random UUID to make the query not match
-                        val id = profile?.id ?: UUID.randomUUID()
-
-                        val playerIdEntry = Negatable(id, sourceInput.allowed)
-                        if (builder.sourcePlayerIds == null) {
-                            builder.sourcePlayerIds =
-                                mutableSetOf(playerIdEntry)
-                        } else {
-                            builder.sourcePlayerIds!!.add(playerIdEntry)
+                        val playerIds = knownPlayerIds(sourceName, source)
+                        if (playerIds.isNotEmpty()) {
+                            playerIds.forEach { id ->
+                                builder.addSourcePlayerId(Negatable(id, sourceInput.allowed))
+                            }
+                        } else if (DatabaseManager.getKnownSources().contains(sourceName)) {
+                            builder.addSourceName(Negatable(sourceName, sourceInput.allowed))
+                        } else if (sourceInput.allowed) {
+                            builder.addSourcePlayerId(Negatable.allow(unmatchedPlayerId))
                         }
                     }
                 }
@@ -183,6 +175,30 @@ object SearchParamArgument {
         }
 
         return builder.build()
+    }
+
+    private fun knownPlayerIds(name: String, source: ServerCommandSource): Set<UUID> {
+        val onlineProfile = source.server.playerManager.getPlayer(name)?.gameProfile
+        return buildSet {
+            onlineProfile?.id?.let(::add)
+            addAll(DatabaseManager.getKnownPlayerIdsByName(name))
+        }
+    }
+
+    private fun ActionSearchParams.Builder.addSourceName(sourceName: Negatable<String>) {
+        if (sourceNames == null) {
+            sourceNames = mutableSetOf(sourceName)
+        } else {
+            sourceNames!!.add(sourceName)
+        }
+    }
+
+    private fun ActionSearchParams.Builder.addSourcePlayerId(sourcePlayerId: Negatable<UUID>) {
+        if (sourcePlayerIds == null) {
+            sourcePlayerIds = mutableSetOf(sourcePlayerId)
+        } else {
+            sourcePlayerIds!!.add(sourcePlayerId)
+        }
     }
 
     fun get(context: CommandContext<ServerCommandSource>, name: String): ActionSearchParams {

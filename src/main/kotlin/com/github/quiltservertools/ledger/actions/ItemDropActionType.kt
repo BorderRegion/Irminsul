@@ -69,7 +69,7 @@ open class ItemDropActionType : AbstractActionType() {
         val entity = world.getEntity(uuid)
 
         if (entity == null) {
-            NbtUtils.entityFromNbt(newEntity, world)?.let { world.spawnEntity(it) }
+            return NbtUtils.entityFromNbt(newEntity, world)?.let { world.spawnEntity(it) } ?: false
         }
         return true
     }

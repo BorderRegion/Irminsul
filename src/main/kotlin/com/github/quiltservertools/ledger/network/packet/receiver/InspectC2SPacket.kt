@@ -3,6 +3,7 @@ package com.github.quiltservertools.ledger.network.packet.receiver
 import com.github.quiltservertools.ledger.Ledger
 import com.github.quiltservertools.ledger.commands.CommandConsts
 import com.github.quiltservertools.ledger.database.DatabaseManager
+import com.github.quiltservertools.ledger.network.Networking
 import com.github.quiltservertools.ledger.network.packet.LedgerPacketTypes
 import com.github.quiltservertools.ledger.network.packet.action.ActionS2CPacket
 import com.github.quiltservertools.ledger.network.packet.response.ResponseCodes
@@ -27,6 +28,7 @@ data class InspectC2SPacket(val pos: BlockPos, val pages: Int) : CustomPayload {
             InspectC2SPacket(it.readBlockPos(), it.readInt())
         })
 
+        @Suppress("TooGenericExceptionCaught")
         override fun receive(payload: InspectC2SPacket, context: ServerPlayNetworking.Context) {
             val player = context.player()
             val sender = context.responseSender()
@@ -38,27 +40,44 @@ data class InspectC2SPacket(val pos: BlockPos, val pages: Int) : CustomPayload {
                         LedgerPacketTypes.INSPECT_POS.id,
                         ResponseCodes.NO_PERMISSION.code
                     ),
-                        sender
+                    sender
                 )
                 return
             }
+            val pages = payload.pages.coerceIn(1, Networking.MAX_NETWORK_RESULT_PAGES)
             ResponseS2CPacket.sendResponse(
                 ResponseContent(LedgerPacketTypes.INSPECT_POS.id, ResponseCodes.EXECUTING.code),
                 sender
             )
 
             Ledger.launch {
-                val results = player.getInspectResults(payload.pos)
-                for (i in 1..payload.pages) {
-                    val page = DatabaseManager.searchActions(results.searchParams, i)
-                    page.actions.forEach { action ->
-                        sender.sendPacket(ActionS2CPacket(action))
+                try {
+                    val results = player.getInspectResults(payload.pos)
+                    if (results.actions.isEmpty()) {
+                        ResponseS2CPacket.sendResponse(
+                            ResponseContent(LedgerPacketTypes.INSPECT_POS.id, ResponseCodes.NO_RESULTS.code),
+                            sender
+                        )
+                        return@launch
                     }
+
+                    for (i in 1..minOf(pages, results.pages)) {
+                        val page = DatabaseManager.searchActions(results.searchParams, i)
+                        page.actions.forEach { action ->
+                            sender.sendPacket(ActionS2CPacket(action))
+                        }
+                    }
+                    ResponseS2CPacket.sendResponse(
+                        ResponseContent(LedgerPacketTypes.INSPECT_POS.id, ResponseCodes.COMPLETED.code),
+                        sender
+                    )
+                } catch (throwable: Throwable) {
+                    Ledger.logger.warn("Network Ledger inspect failed", throwable)
+                    ResponseS2CPacket.sendResponse(
+                        ResponseContent(LedgerPacketTypes.INSPECT_POS.id, ResponseCodes.ERROR.code),
+                        sender
+                    )
                 }
-                ResponseS2CPacket.sendResponse(
-                    ResponseContent(LedgerPacketTypes.INSPECT_POS.id, ResponseCodes.COMPLETED.code),
-                    sender
-                )
             }
         }
     }

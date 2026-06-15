@@ -28,10 +28,12 @@
 
     "text.ledger.rollback.start": "Rolling back %s actions",
     "text.ledger.rollback.finish": "Rollback complete",
+    "text.ledger.rollback.partial": "Rollback partially completed",
     "text.ledger.rollback.fail": "Failed to rollback %s x%s",
 
     "text.ledger.restore.start": "Restoring %s actions",
     "text.ledger.restore.finish": "Restore complete",
+    "text.ledger.restore.partial": "Restore partially completed",
     "text.ledger.restore.fail": "Failed to restore %s x%s",
 
     "text.ledger.inspect.toggle": "Inspect mode: %s",
@@ -48,6 +50,7 @@
     "error.ledger.unspecific.range": "Please specify a range.",
     "error.ledger.unspecific.range_to_big": "The maximum range is %s.",
     "error.ledger.unspecific.source_or_time": "Please specify a source or time (after).",
+    "error.ledger.unspecific.filter": "Please specify at least one filter.",
 
     "text.ledger.action.block-place": "placed",
     "text.ledger.action.block-break": "broke",

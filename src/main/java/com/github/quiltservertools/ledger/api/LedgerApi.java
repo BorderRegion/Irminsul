@@ -24,6 +24,7 @@ public interface LedgerApi {
 
     /**
      * Executes a rollback for the matching actions
+     * Parameters must be specific enough to pass the same safety checks as the rollback command.
      * @param params The search parameters to filter results
      * @return A list of the actions that failed to rollback
      */
@@ -31,6 +32,7 @@ public interface LedgerApi {
 
     /**
      * Executes a restore (undoes a rollback) for the matching actions
+     * Parameters must be specific enough to pass the same safety checks as the restore command.
      * @param params The search parameters to filter results
      * @return A list of the actions that failed to restore
      */

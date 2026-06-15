@@ -135,6 +135,10 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
             Tables.Source.all().forEach {
                 cache.sourceKeys.put(it.name, it.id.value)
             }
+            Tables.Player.all().forEach {
+                cache.playerKeys.put(it.playerId, it.id.value)
+                cache.addPlayerName(it.playerId, it.playerName)
+            }
         }
     }
 
@@ -159,22 +163,8 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
         return@execute countActions(params)
     }
 
-    suspend fun rollbackActions(params: ActionSearchParams): List<ActionType> = execute {
-        val actions = selectRollback(params)
-        val actionIds = actions.map { it.id }.toSet()
-        rollbackActions(actionIds)
-        return@execute actions
-    }
-
     override suspend fun rollbackActions(actionIds: Set<Int>) = execute {
         return@execute rollbackActions(actionIds)
-    }
-
-    suspend fun restoreActions(params: ActionSearchParams): List<ActionType> = execute {
-        val actions = selectRestore(params)
-        val actionIds = actions.map { it.id }.toSet()
-        restoreActions(actionIds)
-        return@execute actions
     }
 
     override suspend fun restoreActions(actionIds: Set<Int>) = execute {
@@ -313,6 +303,8 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
             val paramId = objectToId.apply(it.property)
             if (paramId != null) {
                 idParamSet.add(Negatable(paramId, it.allowed))
+            } else if (!it.allowed) {
+                return@forEach
             } else {
                 // Unknown source name
                 return Op.FALSE
@@ -440,6 +432,9 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
             return@execute selectPlayers(players)
         }
 
+    override fun getKnownPlayerIdsByName(name: String): Set<UUID> =
+        cache.getPlayerIdsByName(name)
+
     private fun Transaction.insertActionType(id: String) {
         Tables.ActionIdentifiers.insertIgnore {
             it[actionIdentifier] = id
@@ -488,28 +483,31 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
                 this.playerName = name
             }
         }
+        cache.addPlayerName(uuid, name)
     }
 
     private fun Transaction.selectActionsSearch(params: ActionSearchParams, page: Int): SearchResults {
         val actions = mutableListOf<ActionType>()
+        val normalizedPage = page.coerceAtLeast(1)
+        val pageSize = config[SearchSpec.pageSize].coerceAtLeast(1)
 
         var query = buildQuery()
             .andWhere { buildQueryParams(params) }
 
         val totalActions: Long = countActions(params)
-        if (totalActions == 0L) return SearchResults(actions, params, page, 0)
+        if (totalActions == 0L) return SearchResults(actions, params, normalizedPage, 0)
 
         query = query.orderBy(Tables.Actions.id, SortOrder.DESC)
         query = query.limit(
-            config[SearchSpec.pageSize],
-            (config[SearchSpec.pageSize] * (page - 1)).toLong()
+            pageSize,
+            (pageSize * (normalizedPage - 1)).toLong()
         ) // TODO better pagination without offset - probably doesn't matter as most people stay on first few pages
 
         actions.addAll(getActionsFromQuery(query))
 
-        val totalPages = ceil(totalActions.toDouble() / config[SearchSpec.pageSize].toDouble()).toInt()
+        val totalPages = ceil(totalActions.toDouble() / pageSize.toDouble()).toInt()
 
-        return SearchResults(actions, params, page, totalPages)
+        return SearchResults(actions, params, normalizedPage, totalPages)
     }
 
     private fun Transaction.countActions(params: ActionSearchParams): Long = Tables.Actions

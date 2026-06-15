@@ -39,6 +39,7 @@ import java.lang.management.ManagementFactory
 import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.DateTimeException
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.ArrayDeque
@@ -65,6 +66,7 @@ private const val STATE_ROLLBACK_RECORD = 1
 private const val STATE_PLAYER_RECORD = 2
 private const val STATE_ROLLBACK_RANGE_RECORD = 3
 private const val MAX_RECORD_BYTES = 16 * 1024 * 1024
+private const val MAX_STRING_BYTES = 16 * 1024 * 1024
 private const val SEGMENT_PREFIX = "actions-"
 private const val SEGMENT_SUFFIX = ".lfda"
 private const val STATE_FILE = "state.lfds"
@@ -93,6 +95,7 @@ class IrminsulLedgerStore : LedgerStore {
     private val orderedIds = IntRingBuffer()
     private val rolledBack = BitSet()
     private val players = HashMap<UUID, PlayerResult>()
+    private val playerIdsByName = HashMap<String, MutableSet<UUID>>()
     private val knownSources = ConcurrentHashMap.newKeySet<String>()
     private val stringDictionary = HashMap<Int, String>()
     private val stringIds = HashMap<String, Int>()
@@ -158,23 +161,24 @@ class IrminsulLedgerStore : LedgerStore {
     }
 
     override suspend fun searchActions(params: ActionSearchParams, page: Int): SearchResults = synchronized(lock) {
-        val pageSize = config[SearchSpec.pageSize]
+        val normalizedPage = page.coerceAtLeast(1)
+        val pageSize = config[SearchSpec.pageSize].coerceAtLeast(1)
         val totalMatches = countMatchingActions(params)
-        if (totalMatches == 0) {
-            SearchResults(emptyList(), params, page, 0)
+        if (totalMatches == 0L) {
+            SearchResults(emptyList(), params, normalizedPage, 0)
         } else {
-            val offset = pageSize * max(page - 1, 0)
+            val offset = pageSize.toLong() * (normalizedPage - 1).toLong()
             val actions = if (offset >= totalMatches) {
                 emptyList()
             } else {
                 pageMatchingActions(params, newestFirst = true, offset, pageSize).mapNotNull { it.toActionType() }
             }
-            SearchResults(actions, params, page, ceil(totalMatches.toDouble() / pageSize.toDouble()).toInt())
+            SearchResults(actions, params, normalizedPage, ceil(totalMatches.toDouble() / pageSize.toDouble()).toInt())
         }
     }
 
     override suspend fun countActions(params: ActionSearchParams): Long = synchronized(lock) {
-        countMatchingActions(params).toLong()
+        countMatchingActions(params)
     }
 
     override suspend fun selectRollback(params: ActionSearchParams): List<ActionType> = synchronized(lock) {
@@ -223,6 +227,7 @@ class IrminsulLedgerStore : LedgerStore {
         } else {
             existing.copy(name = name, lastJoin = now)
         }
+        addKnownPlayerName(uuid, name)
         stateWriter.writePlayer(players.getValue(uuid))
     }
 
@@ -253,6 +258,7 @@ class IrminsulLedgerStore : LedgerStore {
         val retainedRolledBack = retained.asSequence()
             .filter { rolledBack[it.id] }
             .mapTo(HashSet()) { it.id }
+        val retainedPlayers = players.values.toList()
         closeWriters()
         clearMemory()
         resetFiles()
@@ -268,6 +274,10 @@ class IrminsulLedgerStore : LedgerStore {
             addAction(newAction)
             if (retainedRolledBack.contains(oldAction.id)) remappedRolledBack.add(newAction.id)
         }
+        retainedPlayers.forEach { player ->
+            players[player.uuid] = player
+            addKnownPlayerName(player.uuid, player.name)
+        }
         remappedRolledBack.forEach { rolledBack.set(it) }
         rewriteState()
         trimResidentHotWindowIfNeeded()
@@ -276,6 +286,10 @@ class IrminsulLedgerStore : LedgerStore {
 
     override suspend fun searchPlayers(players: Set<GameProfile>): List<PlayerResult> = synchronized(lock) {
         players.mapNotNull { player -> this.players[player.id] }
+    }
+
+    override fun getKnownPlayerIdsByName(name: String): Set<UUID> = synchronized(lock) {
+        playerIdsByName[name.lowercase()].orEmpty().toSet()
     }
 
     override fun getKnownSources(): Set<String> = knownSources
@@ -289,6 +303,7 @@ class IrminsulLedgerStore : LedgerStore {
     private fun loadActions() {
         val retainedActions = ArrayDeque<StoredAction>()
         val loadedSources = HashSet<String>()
+        val loadedPlayerIdsByName = HashMap<String, MutableSet<UUID>>()
         coldActionsOnDisk = 0
         try {
             segmentFiles().forEach { file ->
@@ -296,11 +311,26 @@ class IrminsulLedgerStore : LedgerStore {
                 if (segment >= currentSegment) currentSegment = segment
 
                 var validBytes = 0L
+                var deleteIncompleteHeader = false
+                var skipTruncate = false
                 DataInputStream(BufferedInputStream(file.inputStream())).use { input ->
-                    val magic = input.readInt()
-                    val version = input.readInt()
+                    val magic = try {
+                        input.readInt()
+                    } catch (_: EOFException) {
+                        logWarn("Deleting incomplete Irminsul segment header $file")
+                        deleteIncompleteHeader = true
+                        return@use
+                    }
+                    val version = try {
+                        input.readInt()
+                    } catch (_: EOFException) {
+                        logWarn("Deleting incomplete Irminsul segment header $file")
+                        deleteIncompleteHeader = true
+                        return@use
+                    }
                     if (magic != ACTION_MAGIC || version != FORMAT_VERSION) {
                         logWarn("Skipping unknown Irminsul segment $file")
+                        skipTruncate = true
                         return@use
                     }
                     validBytes = 8L
@@ -317,9 +347,7 @@ class IrminsulLedgerStore : LedgerStore {
                                     val payload = ByteArray(size)
                                     input.readFully(payload)
                                     val action = StoredAction.read(DataInputStream(ByteArrayInputStream(payload)))
-                                    loadedSources.add(action.sourceName)
-                                    retainedActions.retainLoadedAction(action)
-                                    nextId = max(nextId, action.id + 1)
+                                    registerLoadedAction(action, loadedSources, loadedPlayerIdsByName, retainedActions)
                                     validBytes += 1L + Integer.BYTES + size.toLong()
                                 }
                                 STRING_DICTIONARY_RECORD -> {
@@ -332,16 +360,12 @@ class IrminsulLedgerStore : LedgerStore {
                                 }
                                 ACTION_RECORD_V2 -> {
                                     val action = StoredAction.readV2(input, ::dictionaryValue)
-                                    loadedSources.add(action.sourceName)
-                                    retainedActions.retainLoadedAction(action)
-                                    nextId = max(nextId, action.id + 1)
+                                    registerLoadedAction(action, loadedSources, loadedPlayerIdsByName, retainedActions)
                                     validBytes += 1L + actionV2RecordSize(action)
                                 }
                                 ACTION_RECORD_V3 -> {
                                     val action = StoredAction.readV3(input, ::dictionaryValue)
-                                    loadedSources.add(action.sourceName)
-                                    retainedActions.retainLoadedAction(action)
-                                    nextId = max(nextId, action.id + 1)
+                                    registerLoadedAction(action, loadedSources, loadedPlayerIdsByName, retainedActions)
                                     validBytes += 1L + actionV3RecordSize(action)
                                 }
                                 else -> {
@@ -354,11 +378,18 @@ class IrminsulLedgerStore : LedgerStore {
                         }
                     }
                 }
-                truncateToValidBytes(file, validBytes)
+                if (deleteIncompleteHeader) {
+                    Files.deleteIfExists(file)
+                } else if (!skipTruncate) {
+                    truncateToValidBytes(file, validBytes)
+                }
             }
         } finally {
             clearMemory(clearStrings = false)
             knownSources.addAll(loadedSources)
+            loadedPlayerIdsByName.forEach { (name, ids) ->
+                playerIdsByName.computeIfAbsent(name) { HashSet() }.addAll(ids)
+            }
             retainedActions.forEach { action ->
                 registerStrings(action)
                 addAction(action)
@@ -372,6 +403,19 @@ class IrminsulLedgerStore : LedgerStore {
         }
     }
 
+    private fun registerLoadedAction(
+        action: StoredAction,
+        loadedSources: MutableSet<String>,
+        loadedPlayerIdsByName: MutableMap<String, MutableSet<UUID>>,
+        retainedActions: ArrayDeque<StoredAction>
+    ) {
+        if (action.id != nextId) throw EOFException()
+        loadedSources.add(action.sourceName)
+        loadedPlayerIdsByName.add(action.sourcePlayerName, action.sourcePlayerId)
+        retainedActions.retainLoadedAction(action)
+        nextId += 1
+    }
+
     private fun ArrayDeque<StoredAction>.retainLoadedAction(action: StoredAction) {
         if (size >= hotActionLimit) {
             removeFirst()
@@ -380,13 +424,31 @@ class IrminsulLedgerStore : LedgerStore {
         addLast(action)
     }
 
+    private fun MutableMap<String, MutableSet<UUID>>.add(name: String?, uuid: UUID?) {
+        if (name == null || uuid == null) return
+        computeIfAbsent(name.lowercase()) { HashSet() }.add(uuid)
+    }
+
     private fun loadState() {
         if (!statePath.exists()) return
 
         var validBytes = 0L
+        var deleteIncompleteHeader = false
         DataInputStream(BufferedInputStream(statePath.inputStream())).use { input ->
-            val magic = input.readInt()
-            val version = input.readInt()
+            val magic = try {
+                input.readInt()
+            } catch (_: EOFException) {
+                logWarn("Deleting incomplete Irminsul state log header $statePath")
+                deleteIncompleteHeader = true
+                return@use
+            }
+            val version = try {
+                input.readInt()
+            } catch (_: EOFException) {
+                logWarn("Deleting incomplete Irminsul state log header $statePath")
+                deleteIncompleteHeader = true
+                return@use
+            }
             if (magic != STATE_MAGIC || version != FORMAT_VERSION) {
                 logWarn("Skipping unknown Irminsul state log $statePath")
                 return
@@ -399,22 +461,20 @@ class IrminsulLedgerStore : LedgerStore {
                         STATE_ROLLBACK_RECORD -> {
                             val id = input.readInt()
                             val value = input.readBoolean()
-                            if (value) startupRolledBackIds.add(id) else startupRolledBackIds.remove(id)
+                            applyStartupRollbackState(id, value)
                             validBytes += 1L + Integer.BYTES + 1L
                         }
                         STATE_PLAYER_RECORD -> {
                             val player = readPlayer(input)
                             players[player.uuid] = player
+                            addKnownPlayerName(player.uuid, player.name)
                             validBytes += 1L + playerRecordSize(player)
                         }
                         STATE_ROLLBACK_RANGE_RECORD -> {
                             val startId = input.readInt()
                             val count = input.readInt()
                             val value = input.readBoolean()
-                            repeat(count.coerceAtLeast(0)) { offset ->
-                                val id = startId + offset
-                                if (value) startupRolledBackIds.add(id) else startupRolledBackIds.remove(id)
-                            }
+                            applyStartupRollbackStateRange(startId, count, value)
                             validBytes += 1L + Integer.BYTES + Integer.BYTES + 1L
                         }
                         else -> {
@@ -423,11 +483,15 @@ class IrminsulLedgerStore : LedgerStore {
                         }
                     }
                 } catch (_: EOFException) {
-                    return
+                    return@use
                 }
             }
         }
-        truncateToValidBytes(statePath, validBytes)
+        if (deleteIncompleteHeader) {
+            Files.deleteIfExists(statePath)
+        } else {
+            truncateToValidBytes(statePath, validBytes)
+        }
     }
 
     private fun truncateToValidBytes(file: Path, validBytes: Long) {
@@ -470,6 +534,20 @@ class IrminsulLedgerStore : LedgerStore {
         startupRolledBackIds.forEach { id -> rolledBack.set(id) }
     }
 
+    private fun applyStartupRollbackState(id: Int, value: Boolean) {
+        if (id <= 0 || id >= nextId) throw EOFException()
+        if (value) startupRolledBackIds.add(id) else startupRolledBackIds.remove(id)
+    }
+
+    private fun applyStartupRollbackStateRange(startId: Int, count: Int, value: Boolean) {
+        val endExclusive = startId.toLong() + count.toLong()
+        if (startId <= 0 || count <= 0 || endExclusive > nextId.toLong()) throw EOFException()
+        repeat(count) { offset ->
+            val id = startId + offset
+            if (value) startupRolledBackIds.add(id) else startupRolledBackIds.remove(id)
+        }
+    }
+
     private fun updateRollbackState(actionIds: Set<Int>, value: Boolean) {
         if (actionIds.isEmpty()) return
 
@@ -503,7 +581,14 @@ class IrminsulLedgerStore : LedgerStore {
         idsByOldObject.add(action.oldObjectIdentifier, action.id)
         idsBySource.add(action.sourceName, action.id)
         action.sourcePlayerId?.let { idsByPlayer.add(it, action.id) }
+        if (action.sourcePlayerId != null && action.sourcePlayerName != null) {
+            addKnownPlayerName(action.sourcePlayerId, action.sourcePlayerName)
+        }
         idsByChunk.add(LocationKey(action.world, action.x shr 4, action.z shr 4), action.id)
+    }
+
+    private fun addKnownPlayerName(uuid: UUID, name: String) {
+        playerIdsByName.computeIfAbsent(name.lowercase()) { HashSet() }.add(uuid)
     }
 
     private fun registerStrings(action: StoredAction) {
@@ -529,11 +614,12 @@ class IrminsulLedgerStore : LedgerStore {
     }
 
     private fun dictionaryValue(id: Int): String =
-        stringDictionary[id] ?: error("Missing Irminsul dictionary value $id")
+        stringDictionary[id] ?: throw EOFException("Missing Irminsul dictionary value $id")
 
     private fun clearMemory(clearStrings: Boolean = true) {
         clearResidentIndexes(clearRolledBack = true)
         knownSources.clear()
+        playerIdsByName.clear()
         if (clearStrings) {
             stringDictionary.clear()
             stringIds.clear()
@@ -596,8 +682,8 @@ class IrminsulLedgerStore : LedgerStore {
         }
     }
 
-    private fun countMatchingActions(params: ActionSearchParams): Int {
-        var count = 0
+    private fun countMatchingActions(params: ActionSearchParams): Long {
+        var count = 0L
         forEachMatchingHotAction(params, newestFirst = false) {
             count += 1
             true
@@ -610,6 +696,13 @@ class IrminsulLedgerStore : LedgerStore {
     }
 
     private fun selectBlockPlan(params: ActionSearchParams, newestFirst: Boolean): RollbackExecutor.Selection {
+        if (!params.canDedupeBlockActions()) {
+            return RollbackExecutor.Selection(
+                actions = matchingActions(params, newestFirst).mapNotNull { it.toActionType() },
+                dedupeBlockActions = false
+            )
+        }
+
         val unsafeKeys = HashSet<BlockKey>()
         val groups = LinkedHashMap<BlockKey, StoredActionGroup>()
         var requestedActions = 0
@@ -661,11 +754,11 @@ class IrminsulLedgerStore : LedgerStore {
     private fun pageMatchingActions(
         params: ActionSearchParams,
         newestFirst: Boolean,
-        offset: Int,
+        offset: Long,
         limit: Int
     ): List<StoredAction> {
         val page = ArrayList<StoredAction>(limit)
-        var skipped = 0
+        var skipped = 0L
         fun accept(action: StoredAction): Boolean {
             if (skipped < offset) {
                 skipped += 1
@@ -754,7 +847,7 @@ class IrminsulLedgerStore : LedgerStore {
         val actions = ArrayList<StoredAction>()
         val dictionary = HashMap<Int, String>()
         fun dictionaryValue(id: Int): String =
-            dictionary[id] ?: stringDictionary[id] ?: error("Missing Irminsul dictionary value $id")
+            dictionary[id] ?: stringDictionary[id] ?: throw EOFException("Missing Irminsul dictionary value $id")
 
         DataInputStream(BufferedInputStream(file.inputStream())).use { input ->
             val magic = input.readInt()
@@ -1269,7 +1362,7 @@ class IrminsulLedgerStore : LedgerStore {
             fun read(input: DataInputStream): StoredAction = StoredAction(
                 id = input.readInt(),
                 action = input.readUtf8(),
-                timestamp = Instant.ofEpochSecond(input.readLong(), input.readInt().toLong()),
+                timestamp = input.readInstant(),
                 x = input.readInt(),
                 y = input.readInt(),
                 z = input.readInt(),
@@ -1287,7 +1380,7 @@ class IrminsulLedgerStore : LedgerStore {
             fun readV2(input: DataInputStream, dictionaryValue: (Int) -> String): StoredAction = StoredAction(
                 id = input.readInt(),
                 action = dictionaryValue(input.readInt()),
-                timestamp = Instant.ofEpochSecond(input.readLong(), input.readInt().toLong()),
+                timestamp = input.readInstant(),
                 x = input.readInt(),
                 y = input.readInt(),
                 z = input.readInt(),
@@ -1307,7 +1400,7 @@ class IrminsulLedgerStore : LedgerStore {
             fun readV3(input: DataInputStream, dictionaryValue: (Int) -> String): StoredAction = StoredAction(
                 id = input.readInt(),
                 action = dictionaryValue(input.readInt()),
-                timestamp = Instant.ofEpochSecond(input.readLong(), input.readInt().toLong()),
+                timestamp = input.readInstant(),
                 x = input.readInt(),
                 y = input.readInt(),
                 z = input.readInt(),
@@ -1523,9 +1616,21 @@ private fun utf8RecordSize(value: String): Long =
     Integer.BYTES.toLong() + value.toByteArray(Charsets.UTF_8).size
 
 private fun DataInputStream.readUtf8(): String {
-    val bytes = ByteArray(readInt())
+    val length = readInt()
+    if (length < 0 || length > MAX_STRING_BYTES) throw EOFException()
+    val bytes = ByteArray(length)
     readFully(bytes)
     return bytes.toString(Charsets.UTF_8)
+}
+
+private fun DataInputStream.readInstant(): Instant {
+    val epochSecond = readLong()
+    val nano = readInt()
+    return try {
+        Instant.ofEpochSecond(epochSecond, nano.toLong())
+    } catch (_: DateTimeException) {
+        throw EOFException()
+    }
 }
 
 private fun DataOutputStream.writeNullableUtf8(value: String?) {
@@ -1574,8 +1679,8 @@ private fun writePlayer(output: DataOutputStream, player: PlayerResult) {
 private fun readPlayer(input: DataInputStream): PlayerResult = PlayerResult(
     uuid = UUID(input.readLong(), input.readLong()),
     name = input.readUtf8(),
-    firstJoin = Instant.ofEpochSecond(input.readLong(), input.readInt().toLong()),
-    lastJoin = Instant.ofEpochSecond(input.readLong(), input.readInt().toLong())
+    firstJoin = input.readInstant(),
+    lastJoin = input.readInstant()
 )
 
 private fun playerRecordSize(player: PlayerResult): Long =

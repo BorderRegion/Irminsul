@@ -3,6 +3,7 @@ package com.github.quiltservertools.ledger.api
 import com.github.quiltservertools.ledger.Ledger
 import com.github.quiltservertools.ledger.actions.ActionType
 import com.github.quiltservertools.ledger.actionutils.ActionSearchParams
+import com.github.quiltservertools.ledger.actionutils.RollbackOperations
 import com.github.quiltservertools.ledger.actionutils.SearchResults
 import com.github.quiltservertools.ledger.database.ActionQueueService
 import com.github.quiltservertools.ledger.database.DatabaseManager
@@ -17,10 +18,26 @@ internal object LedgerApiImpl : LedgerApi {
         Ledger.future { DatabaseManager.countActions(params) }
 
     override fun rollbackActions(params: ActionSearchParams): CompletableFuture<List<ActionType>> =
-        Ledger.future { DatabaseManager.rollbackActions(params) }
+        Ledger.future {
+            params.ensureSpecific()
+            RollbackOperations.execute(
+                Ledger.server,
+                params,
+                RollbackOperations.Mode.ROLLBACK,
+                dedupeBlockActions = false
+            ).failedActions
+        }
 
     override fun restoreActions(params: ActionSearchParams): CompletableFuture<List<ActionType>> =
-        Ledger.future { DatabaseManager.restoreActions(params) }
+        Ledger.future {
+            params.ensureSpecific()
+            RollbackOperations.execute(
+                Ledger.server,
+                params,
+                RollbackOperations.Mode.RESTORE,
+                dedupeBlockActions = false
+            ).failedActions
+        }
 
     override fun logAction(action: ActionType) {
         ActionQueueService.addToQueue(action)

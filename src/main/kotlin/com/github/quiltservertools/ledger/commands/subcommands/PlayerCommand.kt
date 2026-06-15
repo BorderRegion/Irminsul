@@ -14,6 +14,7 @@ import net.minecraft.server.PlayerConfigEntry
 import net.minecraft.server.command.CommandManager.argument
 import net.minecraft.server.command.CommandManager.literal
 import net.minecraft.server.command.ServerCommandSource
+import net.minecraft.text.Text
 
 object PlayerCommand : BuildableCommand {
     override fun build(): LiteralNode {
@@ -28,10 +29,16 @@ object PlayerCommand : BuildableCommand {
             .build()
     }
 
+    @Suppress("TooGenericExceptionCaught")
     private fun lookupPlayer(profiles: MutableCollection<PlayerConfigEntry>, source: ServerCommandSource): Int {
         Ledger.launch {
-            val players = DatabaseManager.searchPlayers(profiles.map { GameProfile(it.id(), it.name()) }.toSet())
-            MessageUtils.sendPlayerMessage(source, players)
+            try {
+                val players = DatabaseManager.searchPlayers(profiles.map { GameProfile(it.id(), it.name()) }.toSet())
+                MessageUtils.sendPlayerMessage(source, players)
+            } catch (throwable: Throwable) {
+                Ledger.logger.warn("Ledger player lookup failed", throwable)
+                source.sendError(Text.literal(throwable.message ?: "Ledger player lookup failed. Check server logs."))
+            }
         }
 
         return 1

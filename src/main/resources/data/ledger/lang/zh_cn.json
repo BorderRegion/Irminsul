@@ -26,10 +26,12 @@
 
   "text.ledger.rollback.start": "正在回滚，共 %s 次更改",
   "text.ledger.rollback.finish": "完成了指定规则内的回滚",
+  "text.ledger.rollback.partial": "部分回滚完成",
   "text.ledger.rollback.fail": "回滚失败 %s x%s",
 
   "text.ledger.restore.start": "正在还原 %s 次回档更改",
   "text.ledger.restore.finish": "完成了指定规则内的还原",
+  "text.ledger.restore.partial": "部分还原完成",
   "text.ledger.restore.fail": "还原失败 %s x%s",
 
   "text.ledger.inspect.toggle": "查询模式: %s",
@@ -43,6 +45,7 @@
   "error.ledger.no_more_pages": "没有更多页了",
   "error.ledger.unknown_param": "非法参数--> %s",
   "error.ledger.no_preview": "没有可预览的结果,预览失败",
+  "error.ledger.unspecific.filter": "请至少指定一个过滤条件。",
 
   "text.ledger.action.block-place": "放置",
   "text.ledger.action.block-break": "破坏",

@@ -2,12 +2,12 @@ package com.github.quiltservertools.ledger.commands.subcommands
 
 import com.github.quiltservertools.ledger.Ledger
 import com.github.quiltservertools.ledger.actionutils.ActionSearchParams
+import com.github.quiltservertools.ledger.actionutils.RollbackOperations
 import com.github.quiltservertools.ledger.commands.BuildableCommand
 import com.github.quiltservertools.ledger.commands.CommandConsts
 import com.github.quiltservertools.ledger.commands.arguments.SearchParamArgument
 import com.github.quiltservertools.ledger.config.SearchSpec
 import com.github.quiltservertools.ledger.config.config
-import com.github.quiltservertools.ledger.database.DatabaseManager
 import com.github.quiltservertools.ledger.utility.Context
 import com.github.quiltservertools.ledger.utility.LiteralNode
 import com.github.quiltservertools.ledger.utility.TextColorPallet
@@ -28,18 +28,25 @@ object PurgeCommand : BuildableCommand {
             .build()
     }
 
+    @Suppress("TooGenericExceptionCaught")
     private fun runPurge(ctx: Context, params: ActionSearchParams): Int {
         val source = ctx.source
+        params.ensurePurgeScoped()
         source.sendFeedback(
             { Text.translatable("text.ledger.purge.starting").setStyle(TextColorPallet.secondary) },
             true
         )
         Ledger.launch {
-            DatabaseManager.purgeActions(params)
-            source.sendFeedback(
-                { Text.translatable("text.ledger.purge.complete").setStyle(TextColorPallet.secondary) },
-                true
-            )
+            try {
+                RollbackOperations.purge(params)
+                source.sendFeedback(
+                    { Text.translatable("text.ledger.purge.complete").setStyle(TextColorPallet.secondary) },
+                    true
+                )
+            } catch (throwable: Throwable) {
+                Ledger.logger.warn("Ledger purge failed", throwable)
+                source.sendError(Text.literal(throwable.message ?: "Ledger purge failed. Check server logs."))
+            }
         }
         return 1
     }

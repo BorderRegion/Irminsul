@@ -4,19 +4,18 @@ import com.github.quiltservertools.ledger.Ledger
 import com.github.quiltservertools.ledger.commands.CommandConsts
 import com.github.quiltservertools.ledger.commands.arguments.SearchParamArgument
 import com.github.quiltservertools.ledger.database.DatabaseManager
+import com.github.quiltservertools.ledger.network.Networking
 import com.github.quiltservertools.ledger.network.packet.LedgerPacketTypes
+import com.github.quiltservertools.ledger.network.packet.action.ActionS2CPacket
 import com.github.quiltservertools.ledger.network.packet.response.ResponseCodes
 import com.github.quiltservertools.ledger.network.packet.response.ResponseContent
 import com.github.quiltservertools.ledger.network.packet.response.ResponseS2CPacket
-import com.github.quiltservertools.ledger.utility.MessageUtils
-import com.github.quiltservertools.ledger.utility.TextColorPallet
 import kotlinx.coroutines.launch
 import me.lucko.fabric.api.permissions.v0.Permissions
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
 import net.minecraft.network.PacketByteBuf
 import net.minecraft.network.codec.PacketCodec
 import net.minecraft.network.packet.CustomPayload
-import net.minecraft.text.Text
 
 data class SearchC2SPacket(val args: String, val pages: Int) : CustomPayload {
 
@@ -28,6 +27,7 @@ data class SearchC2SPacket(val args: String, val pages: Int) : CustomPayload {
             SearchC2SPacket(it.readString(), it.readInt())
         })
 
+        @Suppress("TooGenericExceptionCaught")
         override fun receive(payload: SearchC2SPacket, context: ServerPlayNetworking.Context) {
             val player = context.player()
             val sender = context.responseSender()
@@ -46,7 +46,16 @@ data class SearchC2SPacket(val args: String, val pages: Int) : CustomPayload {
 
             val source = player.commandSource
 
-            val params = SearchParamArgument.get(payload.args, source)
+            val params = try {
+                SearchParamArgument.get(payload.args, source)
+            } catch (throwable: Throwable) {
+                ResponseS2CPacket.sendResponse(
+                    ResponseContent(LedgerPacketTypes.SEARCH.id, ResponseCodes.ERROR.code),
+                    sender
+                )
+                return
+            }
+            val pages = payload.pages.coerceIn(1, Networking.MAX_NETWORK_RESULT_PAGES)
 
             ResponseS2CPacket.sendResponse(
                 ResponseContent(LedgerPacketTypes.SEARCH.id, ResponseCodes.EXECUTING.code),
@@ -54,29 +63,37 @@ data class SearchC2SPacket(val args: String, val pages: Int) : CustomPayload {
             )
 
             Ledger.launch {
-                Ledger.searchCache[source.name] = params
+                try {
+                    Ledger.searchCache[source.name] = params
+                    val results = DatabaseManager.searchActions(params, 1)
+                    if (results.actions.isEmpty()) {
+                        ResponseS2CPacket.sendResponse(
+                            ResponseContent(LedgerPacketTypes.SEARCH.id, ResponseCodes.NO_RESULTS.code),
+                            sender
+                        )
+                        return@launch
+                    }
 
-                MessageUtils.warnBusy(source)
-                val results = DatabaseManager.searchActions(params, 1)
+                    for (i in 1..minOf(pages, results.pages)) {
+                        DatabaseManager.searchActions(results.searchParams, i).actions.forEach { action ->
+                            sender.sendPacket(ActionS2CPacket(action))
+                        }
+                    }
 
-                for (i in 1..payload.pages) {
-                    val page = DatabaseManager.searchActions(results.searchParams, i)
-                    MessageUtils.sendSearchResults(
-                        source,
-                        page,
-                        Text.translatable(
-                            "text.ledger.header.search"
-                        ).setStyle(TextColorPallet.primary)
+                    ResponseS2CPacket.sendResponse(
+                        ResponseContent(
+                            LedgerPacketTypes.SEARCH.id,
+                            ResponseCodes.COMPLETED.code
+                        ),
+                        sender
+                    )
+                } catch (throwable: Throwable) {
+                    Ledger.logger.warn("Network Ledger search failed", throwable)
+                    ResponseS2CPacket.sendResponse(
+                        ResponseContent(LedgerPacketTypes.SEARCH.id, ResponseCodes.ERROR.code),
+                        sender
                     )
                 }
-
-                ResponseS2CPacket.sendResponse(
-                    ResponseContent(
-                        LedgerPacketTypes.SEARCH.id,
-                        ResponseCodes.COMPLETED.code
-                    ),
-                    sender
-                )
             }
         }
     }

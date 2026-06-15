@@ -4,7 +4,7 @@ Ledger supports numerous custom packets for interacting with supported client mo
 
 ## Versions
 
-The information on this page is applicable for Ledger Networking version 3, which is the version in Ledger versions `1.3.0` and later
+The information on this page is applicable for Ledger Networking version 5.
 
 ## Packet Types
 
@@ -30,7 +30,7 @@ Buf content:
 
 Position: `BlockPos`
 
-Number of pages: `int`
+Number of pages: `int` - capped by the server to 10 pages per request
 
 Return packet type: `ledger.action`
 
@@ -42,7 +42,7 @@ Buf content:
 
 Input: `String`
 
-Pages: `int`
+Pages: `int` - capped by the server to 10 pages per request
 
 String formatted in the same way as a `/lg search` command would be formatted
 
@@ -66,7 +66,7 @@ Mod NBT should contain the following:
 
 ### Purge Packet
 
-Channel: `ledger.purge`
+Channel: `ledger:purge`
 
 Buf content:
 
@@ -74,7 +74,7 @@ Params: `String` - same string as used in the search command
 
 ### Rollback Packet
 
-Channel: `ledger.rollback`
+Channel: `ledger:rollback`
 
 Buf content:
 
@@ -120,15 +120,17 @@ Channel: `ledger:handshake`
 
 Buf content:
 
-Protocol Version: `int` - Version of Ledger networking protocol. Ledger `1.1.0` and later uses version `1`
+Protocol Version: `int` - Version of Ledger networking protocol.
 
-Mod allowed: `boolean`
+Ledger Version: `String`
+
+Action Types: `String[]`
 
 ## Response
 
 Registers the server receiving a Ledger packet and contains information about what the server is doing
 
-Channel: `ledger.response`
+Channel: `ledger:response`
 
 ### Packet structure
 
@@ -147,4 +149,8 @@ Response code: `int`
 `3`: Error while executing command
 
 `4`: Cannot execute command at this time
+
+`5`: No matching results
+
+`6`: Command partially completed
 
