@@ -78,26 +78,18 @@ Notes:
 
 ## Current Validation Results
 
-Built on remote host:
+The current branch was validated with:
 
 ```text
-/home/ubuntu/ledger-irminsul-dev/Ledger
-./gradlew compileKotlin
-./gradlew remapJar
+./gradlew --no-daemon check remapJar --stacktrace --console=plain
 ```
 
-Current jar:
-
-```text
-C:\Users\Borde\Desktop\irminsul\artifacts\ledger-1.3.5+local-irminsul.jar
-SHA256: 3E6934053CBB25CDD943E795A354CE7508601F8F03D4B9247C4FA0805519F4F9
-```
+Runtime smoke tests covered startup, status, search, rollback range validation,
+unknown-source handling, and clean shutdown queue drain.
 
 Extreme queue/cold-history validation:
 
 ```text
-script: /home/ubuntu/ledger-irminsul-dev/validate_remote_spill_cold.sh
-run:    /home/ubuntu/ledger-irminsul-dev/spill-cold-run-20260525-000107
 config: maxQueueSize=256, spillBatchSize=512, irminsulHotActionLimit=10000
 ```
 
@@ -119,25 +111,31 @@ The only error-like log line in this run was a Starlight class-loading warning:
 Error loading class: ca/spottedleaf/starlight/common/thread/SchedulingUtil
 ```
 
-Earlier Irminsul/MySQL comparison on the same remote test server showed:
+Database-layer comparison on the same dataset showed:
 
 ```text
-Irminsul queue drain after fill: about 1.0 s
-MySQL queue drain after fill:  about 35.1 s
-Irminsul rollback range test:  about 1.0 s without heavy pacing
-MySQL rollback range test:     about 2.0 s
-Irminsul storage:              about 20.0 MB
-MySQL storage:                 about 68.7 MB
+actions:                         20588
+Irminsul data size:              about 1.50 MB
+MySQL table+index size:          about 4.83 MB
+latest page:                     0.002 ms vs 40.35 ms
+search all, first page:          2.72 ms vs 41.55 ms
+source-filtered search:          3.55 ms vs 57.28 ms
+hottest chunk search:            0.47 ms vs 2.59 ms
+hottest chunk rollback select:   0.30 ms vs 1.86 ms
 ```
 
 This means the measured improvement is roughly:
 
-- Write drain: about 30x faster in the tested burst workload.
-- Storage: about 70% smaller, or about 3.4x less space.
-- Rollback command selection/application: about 2x faster in the direct comparison,
-  with later paced rollback intentionally trading wall-clock time for server tick
-  stability.
+- Current search/page path: about 5x to 16x faster for the tested filtered queries,
+  and much faster for latest-page queries.
+- Storage: about 69% smaller in the tested dataset.
+- Rollback selection: about 6x faster for the tested hottest-chunk selection.
 - Extreme queue overload: 0 dropped actions in the tested spill workload.
+
+The MySQL comparison uses Ledger's current SQL/JDBC query shape. Hand-optimized
+MySQL queries can close much of the gap by selecting candidate action ids before
+joining dimension tables, so this is a current-path comparison rather than a claim
+that MySQL itself cannot be tuned.
 
 ## Production Readiness
 
@@ -150,20 +148,3 @@ long-term production use, run:
 - modded registry id tests with real mod blocks/entities/items;
 - auto-purge and rewrite tests on large data;
 - backup/restore and rollback-to-SQL operational drills.
-
-## Development Artifacts
-
-Local artifacts are under:
-
-```text
-C:\Users\Borde\Desktop\irminsul\artifacts
-```
-
-Useful scripts:
-
-```text
-validate_remote_spill_cold.sh
-validate_remote_paced_rollback.sh
-run_remote_ledger_perf_hotcap.sh
-run_remote_ledger_perf.sh
-```

@@ -59,6 +59,10 @@ jobs:
                   - Irminsul is an experimental Ledger fork with a local append-only backend.
                   - Enable the backend with \`engine = "irminsul"\` in \`config/ledger.toml\`.
                   - The default Irminsul data directory is \`world/ledger-irminsul\`.
+                  - This release stabilizes rollback/restore/purge orchestration, queue spill recovery, command/network error handling, and Irminsul startup recovery checks.
+                  - Rollback, restore, and purge now drain queued writes before operating and block follow-up operations after a failed rollback-state persistence marker.
+                  - The current benchmark dataset showed 20588 actions, about 1.50 MB of Irminsul data, and about 5x-16x faster current-path search/rollback candidate queries than the existing Ledger MySQL query path.
+                  - Hand-tuned MySQL queries can close part of the gap, so the benchmark is a comparison against Ledger's current SQL/JDBC query shape rather than a general limit of MySQL.
                   - This release is not recommended for an important production server without tested backups and a rollback plan.
                   EOF
 
