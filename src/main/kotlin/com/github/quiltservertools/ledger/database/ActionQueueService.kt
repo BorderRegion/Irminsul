@@ -30,6 +30,7 @@ import java.io.EOFException
 import java.io.FilterInputStream
 import java.io.InputStream
 import java.io.RandomAccessFile
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -77,6 +78,8 @@ object ActionQueueService {
     private val lastFullQueueWarning = AtomicLong(0)
     private val spillLock = Any()
     private val drainMutex = Mutex()
+    private var activeSpillOutput: DataOutputStream? = null
+    private var spillMode = false
 
     val size: Int get() = queuedActions.get()
     val dropped: Long get() = droppedActions.get()
@@ -96,6 +99,7 @@ object ActionQueueService {
         spillProcessingOffsetPath = root.resolve(SPILL_PROCESSING_OFFSET_FILE)
         synchronized(spillLock) {
             stageStartupSpillFiles()
+            spillMode = hasSpill()
         }
         recoveredSpillBytes.set(computeRecoveredSpillPendingBytes())
         job = Ledger.launch {
@@ -107,14 +111,16 @@ object ActionQueueService {
         if (RollbackLogGuard.isSuppressed) return false
         if (action.isBlacklisted()) return false
 
-        if (!reserveQueueSlot()) {
-            if (spillAction(action)) return true
-            warnFullQueue()
-            return false
-        }
+        synchronized(spillLock) {
+            if (spillMode || !reserveQueueSlot()) {
+                if (spillAction(action)) return true
+                warnFullQueue()
+                return false
+            }
 
-        acceptedActions.incrementAndGet()
-        queue.add(action)
+            acceptedActions.incrementAndGet()
+            queue.add(action)
+        }
         return true
     }
 
@@ -213,7 +219,7 @@ object ActionQueueService {
             requeueDrainedBatch(batch)
             throw throwable
         }
-        replaySpillBatch()
+        if (queuedActions.get() == 0) replaySpillBatch()
     }
 
     private fun requeueDrainedBatch(batch: List<ActionType>) {
@@ -241,36 +247,19 @@ object ActionQueueService {
     @Suppress("TooGenericExceptionCaught")
     private fun spillAction(action: ActionType): Boolean {
         return try {
-            synchronized(spillLock) {
-                val appendExisting = ::spillPath.isInitialized &&
-                    spillPath.exists() &&
-                    spillPath.hasValidSpillHeader() &&
-                    runCatching { Files.size(spillPath) >= SPILL_HEADER_BYTES }.getOrDefault(false)
-                val startSize = if (appendExisting) {
-                    runCatching { Files.size(spillPath) }.getOrDefault(0L)
-                } else {
-                    0L
-                }
-                val spillOutputStream = if (appendExisting) {
-                    spillPath.outputStream(StandardOpenOption.CREATE, StandardOpenOption.APPEND)
-                } else {
-                    spillPath.outputStream(StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
-                }
-                try {
-                    DataOutputStream(BufferedOutputStream(spillOutputStream)).use { output ->
-                        if (!appendExisting) {
-                            output.writeInt(SPILL_MAGIC)
-                            output.writeInt(SPILL_VERSION)
-                        }
-                        writeAction(output, action)
-                    }
-                } catch (throwable: Throwable) {
-                    truncateSpillTo(startSize)
-                    throw throwable
-                }
-                acceptedActions.incrementAndGet()
-                spilledActions.incrementAndGet()
+            val output = openActiveSpillOutput()
+            val startSize = runCatching { Files.size(spillPath) }.getOrDefault(SPILL_HEADER_BYTES.toLong())
+            try {
+                writeAction(output, action)
+                output.flush()
+            } catch (throwable: Throwable) {
+                runCatching(::closeActiveSpillOutput)
+                truncateSpillTo(startSize)
+                throw throwable
             }
+            spillMode = true
+            acceptedActions.incrementAndGet()
+            spilledActions.incrementAndGet()
             true
         } catch (throwable: Throwable) {
             logWarn("Failed to spill Ledger action queue to disk", throwable)
@@ -278,8 +267,36 @@ object ActionQueueService {
         }
     }
 
+    private fun openActiveSpillOutput(): DataOutputStream {
+        activeSpillOutput?.let { return it }
+        val appendExisting = ::spillPath.isInitialized &&
+            spillPath.exists() &&
+            spillPath.hasValidSpillHeader() &&
+            runCatching { Files.size(spillPath) >= SPILL_HEADER_BYTES }.getOrDefault(false)
+        val stream = if (appendExisting) {
+            spillPath.outputStream(StandardOpenOption.CREATE, StandardOpenOption.APPEND)
+        } else {
+            spillPath.outputStream(StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
+        }
+        return DataOutputStream(BufferedOutputStream(stream)).also { output ->
+            if (!appendExisting) {
+                output.writeInt(SPILL_MAGIC)
+                output.writeInt(SPILL_VERSION)
+                output.flush()
+            }
+            activeSpillOutput = output
+        }
+    }
+
+    private fun closeActiveSpillOutput() {
+        val output = activeSpillOutput
+        activeSpillOutput = null
+        output?.close()
+    }
+
     private fun truncateSpillTo(size: Long) {
         if (!::spillPath.isInitialized || !spillPath.exists()) return
+        closeActiveSpillOutput()
         if (size <= 0L) {
             Files.deleteIfExists(spillPath)
         } else {
@@ -304,13 +321,14 @@ object ActionQueueService {
             }
         }
         if (spillBatch.actions.isEmpty()) {
-            if (spillBatch.exhausted) {
-                synchronized(spillLock) {
+            synchronized(spillLock) {
+                if (spillBatch.exhausted) {
                     deleteProcessingSpill()
                 }
-                markRecoveredSpillBytesHandled(spillBatch.recordBytes)
-                refreshRecoveredSpillBytes()
+                spillMode = hasSpill()
             }
+            markRecoveredSpillBytesHandled(spillBatch.recordBytes)
+            refreshRecoveredSpillBytes()
             return
         }
 
@@ -319,6 +337,7 @@ object ActionQueueService {
 
         synchronized(spillLock) {
             finishSpillBatch(spillProcessingPath, spillBatch)
+            spillMode = hasSpill()
         }
         if (!recoveredBatch) {
             persistedActions.addAndGet(spillBatch.actions.size.toLong())
@@ -363,6 +382,7 @@ object ActionQueueService {
 
     private fun rotateSpillToProcessing() {
         synchronized(spillLock) {
+            closeActiveSpillOutput()
             if (processingHasSpillRecords()) return
             if (spillProcessingPath.exists()) deleteProcessingSpill()
             val recovery = recoverySpillFiles().firstOrNull()
@@ -377,19 +397,20 @@ object ActionQueueService {
     }
 
     private fun moveSpillFileToProcessing(path: Path) {
-        runCatching {
+        try {
             Files.move(path, spillProcessingPath, StandardCopyOption.ATOMIC_MOVE)
-        }.getOrElse {
+        } catch (_: AtomicMoveNotSupportedException) {
             Files.move(path, spillProcessingPath, StandardCopyOption.REPLACE_EXISTING)
         }
         writeProcessingOffset(SPILL_HEADER_BYTES.toLong())
     }
 
     private fun moveActiveSpillToRecovery() {
+        closeActiveSpillOutput()
         val recoveryPath = nextRecoverySpillPath()
-        runCatching {
+        try {
             Files.move(spillPath, recoveryPath, StandardCopyOption.ATOMIC_MOVE)
-        }.getOrElse {
+        } catch (_: AtomicMoveNotSupportedException) {
             Files.move(spillPath, recoveryPath, StandardCopyOption.REPLACE_EXISTING)
         }
     }
@@ -565,14 +586,14 @@ object ActionQueueService {
         ).use { output ->
             output.writeLong(offset.coerceAtLeast(SPILL_HEADER_BYTES.toLong()))
         }
-        runCatching {
+        try {
             Files.move(
                 temp,
                 spillProcessingOffsetPath,
                 StandardCopyOption.ATOMIC_MOVE,
                 StandardCopyOption.REPLACE_EXISTING
             )
-        }.getOrElse {
+        } catch (_: AtomicMoveNotSupportedException) {
             Files.move(temp, spillProcessingOffsetPath, StandardCopyOption.REPLACE_EXISTING)
         }
     }

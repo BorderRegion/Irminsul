@@ -94,6 +94,23 @@ dependencies {
 tasks {
     val javaVersion = JavaVersion.VERSION_21
 
+    val irminsulCodecTest by registering(JavaExec::class) {
+        group = "verification"
+        description = "Runs Irminsul storage codec regression checks"
+        dependsOn(testClasses)
+        classpath = sourceSets["test"].runtimeClasspath
+        mainClass.set("com.github.quiltservertools.ledger.database.irminsul.IrminsulCodecRegressionKt")
+    }
+
+    check {
+        dependsOn(irminsulCodecTest)
+    }
+
+    test {
+        // Regression checks are executed by irminsulCodecTest without adding a test-framework dependency.
+        failOnNoDiscoveredTests.set(false)
+    }
+
     processResources {
         inputs.property("id", modId)
         inputs.property("name", modName)

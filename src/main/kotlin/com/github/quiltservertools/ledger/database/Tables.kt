@@ -71,6 +71,10 @@ object Tables {
 
         init {
             index("actions_by_location", false, x, y, z, world)
+            index("actions_by_time", false, timestamp)
+            index("actions_by_world_time", false, world, timestamp)
+            index("actions_by_source_time", false, sourceName, timestamp)
+            index("actions_by_rollback_time", false, rolledBack, timestamp)
         }
     }
 

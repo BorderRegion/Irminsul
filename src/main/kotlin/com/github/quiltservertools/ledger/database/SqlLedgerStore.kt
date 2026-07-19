@@ -491,19 +491,24 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
         val normalizedPage = page.coerceAtLeast(1)
         val pageSize = config[SearchSpec.pageSize].coerceAtLeast(1)
 
-        var query = buildQuery()
-            .andWhere { buildQueryParams(params) }
-
         val totalActions: Long = countActions(params)
         if (totalActions == 0L) return SearchResults(actions, params, normalizedPage, 0)
 
-        query = query.orderBy(Tables.Actions.id, SortOrder.DESC)
-        query = query.limit(
-            pageSize,
-            (pageSize * (normalizedPage - 1)).toLong()
-        ) // TODO better pagination without offset - probably doesn't matter as most people stay on first few pages
-
-        actions.addAll(getActionsFromQuery(query))
+        val offset = pageSize.toLong() * (normalizedPage - 1).toLong()
+        if (offset < totalActions) {
+            val candidateIds = Tables.Actions
+                .selectAll()
+                .andWhere { buildQueryParams(params) }
+                .orderBy(Tables.Actions.id, SortOrder.DESC)
+                .limit(pageSize, offset)
+                .map { it[Tables.Actions.id].value }
+            if (candidateIds.isNotEmpty()) {
+                val query = buildQuery()
+                    .andWhere { Tables.Actions.id inList candidateIds }
+                    .orderBy(Tables.Actions.id, SortOrder.DESC)
+                actions.addAll(getActionsFromQuery(query))
+            }
+        }
 
         val totalPages = ceil(totalActions.toDouble() / pageSize.toDouble()).toInt()
 
