@@ -27,4 +27,6 @@ object DatabaseCacheService {
 
     fun getPlayerIdsByName(name: String): Set<UUID> =
         playerIdsByName[name.lowercase()].orEmpty().toSet()
+
+    fun getPlayerNames(): Set<String> = playerIdsByName.keys.toSet()
 }

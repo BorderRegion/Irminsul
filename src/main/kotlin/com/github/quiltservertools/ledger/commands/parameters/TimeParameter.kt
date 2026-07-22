@@ -1,15 +1,23 @@
 package com.github.quiltservertools.ledger.commands.parameters
 
+import com.mojang.brigadier.LiteralMessage
 import com.mojang.brigadier.StringReader
 import com.mojang.brigadier.context.CommandContext
+import com.mojang.brigadier.exceptions.SimpleCommandExceptionType
 import com.mojang.brigadier.suggestion.Suggestions
 import com.mojang.brigadier.suggestion.SuggestionsBuilder
 import net.minecraft.server.command.ServerCommandSource
+import java.time.DateTimeException
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.CompletableFuture
 
 private const val MAX_SIZE = 9
+private val TIME_PATTERN = Regex("(?:[0-9]+[smhdw])+")
+private val TIME_PART_PATTERN = Regex("([0-9]+)([smhdw])")
+private val INVALID_TIME = SimpleCommandExceptionType(
+    LiteralMessage("Invalid time. Use one or more values such as 30m, 2h, or 1d12h.")
+)
 
 class TimeParameter : SimpleParameter<Instant>() {
     private val units = listOf('s', 'm', 'h', 'd', 'w')
@@ -23,13 +31,11 @@ class TimeParameter : SimpleParameter<Instant>() {
         }
 
         val input = stringReader.string.substring(i, stringReader.cursor).lowercase()
+        if (!TIME_PATTERN.matches(input)) throw INVALID_TIME.createWithContext(stringReader)
 
-        val timeRegex = Regex("([0-9]+)([smhdw])")
-        val times = timeRegex.findAll(input)
-
-        var duration = Duration.ZERO
-        for (time in times) {
-            if (time.groups.size == 3) {
+        return try {
+            var duration = Duration.ZERO
+            for (time in TIME_PART_PATTERN.findAll(input)) {
                 val timeValue = time.groupValues[1].toLong()
                 val timeUnit = time.groupValues[2]
 
@@ -38,15 +44,20 @@ class TimeParameter : SimpleParameter<Instant>() {
                     "m" -> duration = duration.plusMinutes(timeValue)
                     "h" -> duration = duration.plusHours(timeValue)
                     "d" -> duration = duration.plusDays(timeValue)
-                    "w" -> duration = duration.plusDays(timeValue * 7)
+                    "w" -> duration = duration.plusDays(Math.multiplyExact(timeValue, 7L))
                 }
             }
+            Instant.now().minus(duration)
+        } catch (_: NumberFormatException) {
+            throw INVALID_TIME.createWithContext(stringReader)
+        } catch (_: ArithmeticException) {
+            throw INVALID_TIME.createWithContext(stringReader)
+        } catch (_: DateTimeException) {
+            throw INVALID_TIME.createWithContext(stringReader)
         }
-
-        return Instant.now().minus(duration)
     }
 
-    private fun isCharValid(c: Char) = c in '0'..'9' || c in 'a'..'z'
+    private fun isCharValid(c: Char) = c in '0'..'9' || c.lowercaseChar() in 'a'..'z'
 
     override fun getSuggestions(
         context: CommandContext<ServerCommandSource>,

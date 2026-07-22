@@ -61,7 +61,6 @@ import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.io.path.inputStream
 import kotlin.io.path.name
-import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.streams.toList
 
@@ -252,31 +251,48 @@ class IrminsulLedgerStore : LedgerStore {
         logInfo("Irminsul purged $deleted actions older than $days days")
     }
 
-    override suspend fun searchActions(params: ActionSearchParams, page: Int): SearchResults = synchronized(lock) {
-        val normalizedPage = page.coerceAtLeast(1)
+    override suspend fun searchActionPages(
+        params: ActionSearchParams,
+        firstPage: Int,
+        pageCount: Int
+    ): List<SearchResults> = synchronized(lock) {
+        val normalizedPage = firstPage.coerceAtLeast(1)
+        val normalizedPageCount = pageCount.coerceAtLeast(1)
         val pageSize = config[SearchSpec.pageSize].coerceAtLeast(1)
         val offset = pageSize.toLong() * (normalizedPage - 1).toLong()
+        val requestedActions = (pageSize.toLong() * normalizedPageCount.toLong())
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
         val fastCount = countMatchingActionsWithoutScan(params)
         val result = if (fastCount != null) {
             val totalMatches = fastCount
             val actions = if (offset >= totalMatches) {
                 emptyList()
             } else {
-                pageMatchingActions(params, newestFirst = true, offset, pageSize)
+                pageMatchingActions(params, newestFirst = true, offset, requestedActions)
             }
             PageScan(actions, totalMatches)
         } else {
-            scanMatchingPage(params, newestFirst = true, offset, pageSize)
+            scanMatchingPage(params, newestFirst = true, offset, requestedActions)
         }
         if (result.totalMatches == 0L) {
-            SearchResults(emptyList(), params, normalizedPage, 0)
+            listOf(SearchResults(emptyList(), params, normalizedPage, 0))
         } else {
-            SearchResults(
-                result.actions.mapNotNull { it.toActionType() },
-                params,
-                normalizedPage,
-                ceil(result.totalMatches.toDouble() / pageSize.toDouble()).toInt()
-            )
+            val totalPages = ((result.totalMatches - 1L) / pageSize.toLong() + 1L)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+            if (normalizedPage > totalPages) {
+                listOf(SearchResults(emptyList(), params, normalizedPage, totalPages))
+            } else {
+                result.actions.chunked(pageSize).mapIndexed { pageOffset, storedActions ->
+                    SearchResults(
+                        storedActions.mapNotNull { it.toActionType() },
+                        params,
+                        normalizedPage + pageOffset,
+                        totalPages
+                    )
+                }
+            }
         }
     }
 
@@ -602,12 +618,16 @@ class IrminsulLedgerStore : LedgerStore {
         }
     }
 
-    override suspend fun searchPlayers(players: Set<GameProfile>): List<PlayerResult> = synchronized(lock) {
-        players.mapNotNull { player -> this.players[player.id] }
+    override suspend fun searchPlayers(playerIds: Set<UUID>): List<PlayerResult> = synchronized(lock) {
+        playerIds.mapNotNull(players::get)
     }
 
     override fun getKnownPlayerIdsByName(name: String): Set<UUID> = synchronized(lock) {
         playerIdsByName[name.lowercase()].orEmpty().toSet()
+    }
+
+    override fun getKnownPlayerNames(): Set<String> = synchronized(lock) {
+        playerIdsByName.keys.toSet()
     }
 
     override fun getKnownSources(): Set<String> = knownSources

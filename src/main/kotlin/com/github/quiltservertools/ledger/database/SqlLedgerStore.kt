@@ -50,7 +50,6 @@ import org.jetbrains.exposed.sql.innerJoin
 import org.jetbrains.exposed.sql.insertAndGetId
 import org.jetbrains.exposed.sql.insertIgnore
 import org.jetbrains.exposed.sql.or
-import org.jetbrains.exposed.sql.orWhere
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.statements.StatementContext
 import org.jetbrains.exposed.sql.statements.expandArgs
@@ -65,7 +64,6 @@ import java.util.*
 import java.util.function.Function
 import javax.sql.DataSource
 import kotlin.io.path.pathString
-import kotlin.math.ceil
 
 const val MAX_QUERY_RETRIES = 10
 const val MIN_RETRY_DELAY = 1000L
@@ -111,6 +109,7 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
         })
         SchemaUtils.createMissingTablesAndColumns(
             Tables.Players,
+            Tables.PlayerAliases,
             Tables.Actions,
             Tables.ActionIdentifiers,
             Tables.ObjectIdentifiers,
@@ -139,6 +138,9 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
                 cache.playerKeys.put(it.playerId, it.id.value)
                 cache.addPlayerName(it.playerId, it.playerName)
             }
+            Tables.PlayerAliases.innerJoin(Tables.Players).selectAll().forEach {
+                cache.addPlayerName(it[Tables.Players.playerId], it[Tables.PlayerAliases.playerName])
+            }
         }
     }
 
@@ -155,8 +157,12 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
         }
     }
 
-    override suspend fun searchActions(params: ActionSearchParams, page: Int): SearchResults = execute {
-        return@execute selectActionsSearch(params, page)
+    override suspend fun searchActionPages(
+        params: ActionSearchParams,
+        firstPage: Int,
+        pageCount: Int
+    ): List<SearchResults> = execute {
+        return@execute selectActionPages(params, firstPage, pageCount)
     }
 
     override suspend fun countActions(params: ActionSearchParams): Long = execute {
@@ -427,13 +433,15 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
         }
     }
 
-    override suspend fun searchPlayers(players: Set<GameProfile>): List<PlayerResult> =
+    override suspend fun searchPlayers(playerIds: Set<UUID>): List<PlayerResult> =
         execute {
-            return@execute selectPlayers(players)
+            return@execute selectPlayers(playerIds)
         }
 
     override fun getKnownPlayerIdsByName(name: String): Set<UUID> =
         cache.getPlayerIdsByName(name)
+
+    override fun getKnownPlayerNames(): Set<String> = cache.getPlayerNames()
 
     private fun Transaction.insertActionType(id: String) {
         Tables.ActionIdentifiers.insertIgnore {
@@ -474,45 +482,79 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
     private fun Transaction.insertOrUpdatePlayer(uuid: UUID, name: String) {
         val player = Tables.Player.find { Tables.Players.playerId eq uuid }.firstOrNull()
 
-        if (player != null) {
+        val updated = if (player != null) {
+            insertPlayerAlias(player, player.playerName)
             player.lastJoin = Instant.now()
             player.playerName = name
+            player
         } else {
             Tables.Player.new {
                 this.playerId = uuid
                 this.playerName = name
             }
         }
+        insertPlayerAlias(updated, name)
         cache.addPlayerName(uuid, name)
     }
 
-    private fun Transaction.selectActionsSearch(params: ActionSearchParams, page: Int): SearchResults {
-        val actions = mutableListOf<ActionType>()
-        val normalizedPage = page.coerceAtLeast(1)
+    private fun Transaction.insertPlayerAlias(player: Tables.Player, name: String) {
+        Tables.PlayerAliases.insertIgnore {
+            it[Tables.PlayerAliases.player] = player.id
+            it[Tables.PlayerAliases.playerName] = name
+        }
+    }
+
+    private fun Transaction.selectActionPages(
+        params: ActionSearchParams,
+        firstPage: Int,
+        pageCount: Int
+    ): List<SearchResults> {
+        val normalizedPage = firstPage.coerceAtLeast(1)
+        val normalizedPageCount = pageCount.coerceAtLeast(1)
         val pageSize = config[SearchSpec.pageSize].coerceAtLeast(1)
 
         val totalActions: Long = countActions(params)
-        if (totalActions == 0L) return SearchResults(actions, params, normalizedPage, 0)
-
-        val offset = pageSize.toLong() * (normalizedPage - 1).toLong()
-        if (offset < totalActions) {
-            val candidateIds = Tables.Actions
-                .selectAll()
-                .andWhere { buildQueryParams(params) }
-                .orderBy(Tables.Actions.id, SortOrder.DESC)
-                .limit(pageSize, offset)
-                .map { it[Tables.Actions.id].value }
-            if (candidateIds.isNotEmpty()) {
-                val query = buildQuery()
-                    .andWhere { Tables.Actions.id inList candidateIds }
-                    .orderBy(Tables.Actions.id, SortOrder.DESC)
-                actions.addAll(getActionsFromQuery(query))
-            }
+        if (totalActions == 0L) {
+            return listOf(SearchResults(emptyList(), params, normalizedPage, 0))
         }
 
-        val totalPages = ceil(totalActions.toDouble() / pageSize.toDouble()).toInt()
+        val totalPages = ((totalActions - 1L) / pageSize.toLong() + 1L)
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+        if (normalizedPage > totalPages) {
+            return listOf(SearchResults(emptyList(), params, normalizedPage, totalPages))
+        }
 
-        return SearchResults(actions, params, normalizedPage, totalPages)
+        val offset = pageSize.toLong() * (normalizedPage - 1).toLong()
+        val lastPage = minOf(
+            totalPages.toLong(),
+            normalizedPage.toLong() + normalizedPageCount.toLong() - 1L
+        ).toInt()
+        val requestedActions = (lastPage - normalizedPage + 1).toLong() * pageSize.toLong()
+        val candidateIds = Tables.Actions
+            .selectAll()
+            .andWhere { buildQueryParams(params) }
+            .orderBy(Tables.Actions.id, SortOrder.DESC)
+            .limit(requestedActions.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), offset)
+            .map { it[Tables.Actions.id].value }
+        if (candidateIds.isEmpty()) {
+            return listOf(SearchResults(emptyList(), params, normalizedPage, totalPages))
+        }
+
+        val actionsById = getActionsFromQuery(
+            buildQuery()
+                .andWhere { Tables.Actions.id inList candidateIds }
+                .orderBy(Tables.Actions.id, SortOrder.DESC)
+        ).associateBy(ActionType::id)
+
+        return candidateIds.chunked(pageSize).mapIndexed { pageOffset, pageIds ->
+            SearchResults(
+                pageIds.mapNotNull(actionsById::get),
+                params,
+                normalizedPage + pageOffset,
+                totalPages
+            )
+        }
     }
 
     private fun Transaction.countActions(params: ActionSearchParams): Long = Tables.Actions
@@ -674,12 +716,9 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
                 .where(buildQueryParams(params))
         }
 
-    private fun Transaction.selectPlayers(players: Set<GameProfile>): List<PlayerResult> {
-        val query = Tables.Players.selectAll()
-        for (player in players) {
-            query.orWhere { Tables.Players.playerId eq player.id }
-        }
-
+    private fun Transaction.selectPlayers(playerIds: Set<UUID>): List<PlayerResult> {
+        if (playerIds.isEmpty()) return emptyList()
+        val query = Tables.Players.selectAll().where { Tables.Players.playerId inList playerIds }
         return Tables.Player.wrapRows(query).toList().map { PlayerResult.fromRow(it) }
     }
 }

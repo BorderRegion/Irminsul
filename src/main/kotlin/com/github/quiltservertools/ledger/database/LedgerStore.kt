@@ -6,7 +6,6 @@ import com.github.quiltservertools.ledger.actionutils.Preview
 import com.github.quiltservertools.ledger.actionutils.RollbackExecutor
 import com.github.quiltservertools.ledger.actionutils.SearchResults
 import com.github.quiltservertools.ledger.utility.PlayerResult
-import com.mojang.authlib.GameProfile
 import net.minecraft.util.Identifier
 import java.util.UUID
 
@@ -17,7 +16,14 @@ interface LedgerStore {
     fun ensureTables()
     suspend fun setupCache()
     suspend fun autoPurge()
-    suspend fun searchActions(params: ActionSearchParams, page: Int): SearchResults
+    suspend fun searchActions(params: ActionSearchParams, page: Int): SearchResults =
+        searchActionPages(params, page, 1).first()
+
+    suspend fun searchActionPages(
+        params: ActionSearchParams,
+        firstPage: Int,
+        pageCount: Int
+    ): List<SearchResults>
     suspend fun countActions(params: ActionSearchParams): Long
     suspend fun selectRollback(params: ActionSearchParams): List<ActionType>
     suspend fun selectRestore(params: ActionSearchParams): List<ActionType>
@@ -36,8 +42,9 @@ interface LedgerStore {
     suspend fun rollbackActions(actionIds: Set<Int>)
     suspend fun restoreActions(actionIds: Set<Int>)
     suspend fun purgeActions(params: ActionSearchParams)
-    suspend fun searchPlayers(players: Set<GameProfile>): List<PlayerResult>
+    suspend fun searchPlayers(playerIds: Set<UUID>): List<PlayerResult>
     fun getKnownPlayerIdsByName(name: String): Set<UUID>
+    fun getKnownPlayerNames(): Set<String>
     fun getKnownSources(): Set<String>
     fun close()
 }

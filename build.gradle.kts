@@ -102,8 +102,17 @@ tasks {
         mainClass.set("com.github.quiltservertools.ledger.database.irminsul.IrminsulCodecRegressionKt")
     }
 
+    val commandParameterTest by registering(JavaExec::class) {
+        group = "verification"
+        description = "Runs Ledger command and offline-player regression checks"
+        dependsOn(testClasses)
+        classpath = sourceSets["test"].runtimeClasspath
+        mainClass.set("com.github.quiltservertools.ledger.commands.parameters.CommandParameterRegressionKt")
+    }
+
     check {
         dependsOn(irminsulCodecTest)
+        dependsOn(commandParameterTest)
     }
 
     test {

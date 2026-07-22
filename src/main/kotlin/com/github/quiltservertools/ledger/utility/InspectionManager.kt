@@ -135,7 +135,9 @@ private fun getOtherBedPart(state: BlockState, pos: BlockPos): BlockPos {
     }
 }
 
-suspend fun PlayerEntity.getInspectResults(pos: BlockPos): SearchResults {
+suspend fun PlayerEntity.getInspectResults(pos: BlockPos): SearchResults = getInspectResultPages(pos, 1).first()
+
+suspend fun PlayerEntity.getInspectResultPages(pos: BlockPos, pageCount: Int): List<SearchResults> {
     val source = (this as ServerPlayerEntity).commandSource
     val params = ActionSearchParams.build {
         bounds = BlockBox(pos)
@@ -144,5 +146,5 @@ suspend fun PlayerEntity.getInspectResults(pos: BlockPos): SearchResults {
 
     Ledger.searchCache[source.name] = params
     MessageUtils.warnBusy(source)
-    return DatabaseManager.searchActions(params, 1)
+    return DatabaseManager.searchActionPages(params, 1, pageCount)
 }

@@ -44,7 +44,7 @@ data class ActionSearchParams(
                 Text.translatable("error.ledger.unspecific.range_to_big", Ledger.config[SearchSpec.maxRange])
             ).create()
         }
-        if (sourceNames == null && sourcePlayerIds == null && after == null && before == null) {
+        if (sourceNames.isNullOrEmpty() && sourcePlayerIds.isNullOrEmpty() && after == null && before == null) {
             throw SimpleCommandExceptionType(Text.translatable("error.ledger.unspecific.source_or_time")).create()
         }
     }
@@ -53,18 +53,21 @@ data class ActionSearchParams(
         if (bounds == null &&
             before == null &&
             after == null &&
-            actions == null &&
-            objects == null &&
-            sourceNames == null &&
-            sourcePlayerIds == null &&
-            worlds == null
+            actions.isNullOrEmpty() &&
+            objects.isNullOrEmpty() &&
+            sourceNames.isNullOrEmpty() &&
+            sourcePlayerIds.isNullOrEmpty() &&
+            worlds.isNullOrEmpty()
         ) {
             throw SimpleCommandExceptionType(Text.translatable("error.ledger.unspecific.filter")).create()
         }
     }
 
     fun canDedupeBlockActions(): Boolean =
-        actions == null && objects == null && sourceNames == null && sourcePlayerIds == null
+        actions.isNullOrEmpty() &&
+            objects.isNullOrEmpty() &&
+            sourceNames.isNullOrEmpty() &&
+            sourcePlayerIds.isNullOrEmpty()
 
     companion object {
         inline fun build(block: Builder.() -> Unit) = Builder().apply(block).build()

@@ -5,6 +5,7 @@ import org.jetbrains.exposed.dao.IntEntity
 import org.jetbrains.exposed.dao.IntEntityClass
 import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.dao.id.IntIdTable
+import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.alias
 import org.jetbrains.exposed.sql.javatime.timestamp
 import java.time.Instant
@@ -29,6 +30,13 @@ object Tables {
         var lastJoin by Players.lastJoin
 
         companion object : IntEntityClass<Player>(Players)
+    }
+
+    object PlayerAliases : Table("player_aliases") {
+        val player = reference("player_id", Players)
+        val playerName = varchar("player_name", MAX_PLAYER_NAME_LENGTH)
+
+        override val primaryKey = PrimaryKey(player, playerName)
     }
 
     object ActionIdentifiers : IntIdTable() {

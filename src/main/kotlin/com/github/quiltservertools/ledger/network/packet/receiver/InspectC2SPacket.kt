@@ -2,14 +2,13 @@ package com.github.quiltservertools.ledger.network.packet.receiver
 
 import com.github.quiltservertools.ledger.Ledger
 import com.github.quiltservertools.ledger.commands.CommandConsts
-import com.github.quiltservertools.ledger.database.DatabaseManager
 import com.github.quiltservertools.ledger.network.Networking
 import com.github.quiltservertools.ledger.network.packet.LedgerPacketTypes
 import com.github.quiltservertools.ledger.network.packet.action.ActionS2CPacket
 import com.github.quiltservertools.ledger.network.packet.response.ResponseCodes
 import com.github.quiltservertools.ledger.network.packet.response.ResponseContent
 import com.github.quiltservertools.ledger.network.packet.response.ResponseS2CPacket
-import com.github.quiltservertools.ledger.utility.getInspectResults
+import com.github.quiltservertools.ledger.utility.getInspectResultPages
 import kotlinx.coroutines.launch
 import me.lucko.fabric.api.permissions.v0.Permissions
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
@@ -52,8 +51,8 @@ data class InspectC2SPacket(val pos: BlockPos, val pages: Int) : CustomPayload {
 
             Ledger.launch {
                 try {
-                    val results = player.getInspectResults(payload.pos)
-                    if (results.actions.isEmpty()) {
+                    val resultPages = player.getInspectResultPages(payload.pos, pages)
+                    if (resultPages.first().actions.isEmpty()) {
                         ResponseS2CPacket.sendResponse(
                             ResponseContent(LedgerPacketTypes.INSPECT_POS.id, ResponseCodes.NO_RESULTS.code),
                             sender
@@ -61,9 +60,8 @@ data class InspectC2SPacket(val pos: BlockPos, val pages: Int) : CustomPayload {
                         return@launch
                     }
 
-                    for (i in 1..minOf(pages, results.pages)) {
-                        val page = DatabaseManager.searchActions(results.searchParams, i)
-                        page.actions.forEach { action ->
+                    resultPages.forEach { results ->
+                        results.actions.forEach { action ->
                             sender.sendPacket(ActionS2CPacket(action))
                         }
                     }

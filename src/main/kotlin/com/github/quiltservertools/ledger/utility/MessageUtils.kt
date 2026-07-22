@@ -27,10 +27,20 @@ object MessageUtils {
         // If the player has a Ledger compatible client, we send results as action packets rather than as chat messages
         if (source.hasPlayer() && source.playerOrThrow.hasNetworking()) {
             val player = source.playerOrThrow
-            val lastNetworkPage = minOf(results.pages, results.page + MAX_NETWORK_RESULT_PAGES - 1)
-            for (n in results.page..lastNetworkPage) {
-                val networkResults = DatabaseManager.searchActions(results.searchParams, n)
-                networkResults.actions.forEach {
+            val lastNetworkPage = minOf(
+                results.pages.toLong(),
+                results.page.toLong() + MAX_NETWORK_RESULT_PAGES.toLong() - 1L
+            ).toInt()
+            results.actions.forEach {
+                ServerPlayNetworking.send(player, ActionS2CPacket(it))
+            }
+            val remainingPages = lastNetworkPage - results.page
+            if (remainingPages > 0) {
+                DatabaseManager.searchActionPages(
+                    results.searchParams,
+                    results.page + 1,
+                    remainingPages
+                ).flatMap(SearchResults::actions).forEach {
                     ServerPlayNetworking.send(player, ActionS2CPacket(it))
                 }
             }

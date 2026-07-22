@@ -255,8 +255,8 @@ object SearchParamArgument {
 
         @Throws(CommandSyntaxException::class)
         fun parseNegatable(reader: StringReader): Negatable<T> {
-            if (reader.string.isEmpty()) return Negatable.allow(parse(reader))
-            return if (reader.string[reader.cursor] == '!') {
+            if (!reader.canRead()) return Negatable.allow(parse(reader))
+            return if (reader.peek() == '!') {
                 reader.skip()
                 Negatable.deny(super.parse(reader))
             } else {

@@ -11,7 +11,6 @@ import com.github.quiltservertools.ledger.config.isIrminsulEngine
 import com.github.quiltservertools.ledger.database.irminsul.IrminsulLedgerStore
 import com.github.quiltservertools.ledger.logInfo
 import com.github.quiltservertools.ledger.utility.PlayerResult
-import com.mojang.authlib.GameProfile
 import net.minecraft.util.Identifier
 import java.util.UUID
 import javax.sql.DataSource
@@ -38,6 +37,12 @@ object DatabaseManager {
     suspend fun autoPurge() = store.autoPurge()
     suspend fun searchActions(params: ActionSearchParams, page: Int): SearchResults =
         store.searchActions(params, page)
+
+    suspend fun searchActionPages(
+        params: ActionSearchParams,
+        firstPage: Int,
+        pageCount: Int
+    ): List<SearchResults> = store.searchActionPages(params, firstPage, pageCount)
 
     suspend fun countActions(params: ActionSearchParams): Long =
         store.countActions(params)
@@ -81,11 +86,14 @@ object DatabaseManager {
     suspend fun purgeActions(params: ActionSearchParams) =
         store.purgeActions(params)
 
-    suspend fun searchPlayers(players: Set<GameProfile>): List<PlayerResult> =
-        store.searchPlayers(players)
+    suspend fun searchPlayers(playerIds: Set<UUID>): List<PlayerResult> =
+        store.searchPlayers(playerIds)
 
     fun getKnownPlayerIdsByName(name: String): Set<UUID> =
         store.getKnownPlayerIdsByName(name)
+
+    fun getKnownPlayerNames(): Set<String> =
+        store.getKnownPlayerNames()
 
     fun getKnownSources(): Set<String> =
         store.getKnownSources()
