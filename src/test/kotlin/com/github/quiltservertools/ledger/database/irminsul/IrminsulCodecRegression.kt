@@ -321,6 +321,16 @@ private fun segmentSummarySkipsImpossibleFilters() {
     check(summary.countPlayers(setOf(SAMPLE.sourcePlayerId!!)) == 1L)
     check(summary.countObject(SAMPLE.objectIdentifier) == 1L)
     check(summary.countObject(SAMPLE.oldObjectIdentifier) == 1L)
+    val coveredTime = ActionSearchParams.build {
+        after = SAMPLE.timestamp.minusSeconds(1)
+        before = SAMPLE.timestamp.plusSeconds(1)
+    }
+    check(summary.isFullyCoveredByTime(coveredTime))
+    check(summary.countMatching(coveredTime) == 1L)
+    check(summary.countMatching(missingAction) == 0L)
+    check(summary.isEntirelyBefore(SAMPLE.id + 1))
+    check(!summary.isEntirelyBefore(SAMPLE.id))
+    check(!summary.isFullyCoveredByTime(ActionSearchParams.build { after = SAMPLE.timestamp.plusNanos(1) }))
     val selfTransitionSummary = IrminsulLedgerStore.SegmentSummary().apply {
         add(SAMPLE.copy(oldObjectIdentifier = SAMPLE.objectIdentifier))
     }

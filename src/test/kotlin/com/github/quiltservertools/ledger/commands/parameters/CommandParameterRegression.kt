@@ -1,6 +1,8 @@
 package com.github.quiltservertools.ledger.commands.parameters
 
+import com.github.quiltservertools.ledger.Ledger
 import com.github.quiltservertools.ledger.actionutils.ActionSearchParams
+import com.github.quiltservertools.ledger.actionutils.SearchResults
 import com.github.quiltservertools.ledger.commands.subcommands.resolveDirectPlayerIds
 import com.github.quiltservertools.ledger.database.DatabaseCacheService
 import com.github.quiltservertools.ledger.database.SqlLedgerStore
@@ -27,6 +29,7 @@ fun main() {
     playerNameIndexRetainsOfflineAliases()
     directPlayerLookupUsesLedgerHistoryAndUuids()
     sqlPlayerAliasSchemaMigratesExistingDatabase()
+    searchResultCacheRetainsRecentWindowsAndIsolatesQueries()
 }
 
 private fun rollbackStatusRejectsInvalidValues() {
@@ -144,6 +147,36 @@ private fun sqlPlayerAliasSchemaMigratesExistingDatabase() {
     } finally {
         directory.toFile().deleteRecursively()
     }
+}
+
+private fun searchResultCacheRetainsRecentWindowsAndIsolatesQueries() {
+    val sourceName = "cache-regression"
+    val params = ActionSearchParams.build {}
+    val pages = (1..30).associateWith { page -> SearchResults(emptyList(), params, page, 30) }
+
+    Ledger.clearSearchResults(sourceName)
+    Ledger.cacheSearchResults(sourceName, params, (1..10).map(pages::getValue))
+    Ledger.cacheSearchResults(sourceName, params, (11..20).map(pages::getValue))
+    check((1..20).all { Ledger.getCachedSearchResult(sourceName, params, it) === pages.getValue(it) })
+
+    Ledger.cacheSearchResults(sourceName, params, (21..30).map(pages::getValue))
+    check((1..10).all { Ledger.getCachedSearchResult(sourceName, params, it) == null })
+    check((11..30).all { Ledger.getCachedSearchResult(sourceName, params, it) === pages.getValue(it) })
+
+    Ledger.cacheSearchResults(sourceName, params, (1..10).map(pages::getValue))
+    check((1..10).all { Ledger.getCachedSearchResult(sourceName, params, it) === pages.getValue(it) })
+    check((11..20).all { Ledger.getCachedSearchResult(sourceName, params, it) == null })
+    check((21..30).all { Ledger.getCachedSearchResult(sourceName, params, it) === pages.getValue(it) })
+    check(Ledger.getCachedSearchTotalPages(sourceName, params) == 30)
+
+    val nextParams = ActionSearchParams.build {}
+    check(params == nextParams && params !== nextParams)
+    val replacement = SearchResults(emptyList(), nextParams, 1, 1)
+    Ledger.cacheSearchResults(sourceName, nextParams, listOf(replacement))
+    check(Ledger.getCachedSearchResult(sourceName, params, 1) == null)
+    check(Ledger.getCachedSearchResult(sourceName, nextParams, 1) === replacement)
+    check(Ledger.getCachedSearchTotalPages(sourceName, nextParams) == 1)
+    Ledger.clearSearchResults(sourceName)
 }
 
 private fun assertSyntaxFailure(block: () -> Unit) {

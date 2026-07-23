@@ -31,17 +31,26 @@ object MessageUtils {
                 results.pages.toLong(),
                 results.page.toLong() + MAX_NETWORK_RESULT_PAGES.toLong() - 1L
             ).toInt()
-            results.actions.forEach {
-                ServerPlayNetworking.send(player, ActionS2CPacket(it))
+            val cachedPages = (results.page..lastNetworkPage).mapNotNull {
+                Ledger.getCachedSearchResult(source.name, results.searchParams, it)
             }
-            val remainingPages = lastNetworkPage - results.page
-            if (remainingPages > 0) {
-                DatabaseManager.searchActionPages(
-                    results.searchParams,
-                    results.page + 1,
-                    remainingPages
-                ).flatMap(SearchResults::actions).forEach {
+            if (cachedPages.size == lastNetworkPage - results.page + 1) {
+                cachedPages.flatMap(SearchResults::actions).forEach {
                     ServerPlayNetworking.send(player, ActionS2CPacket(it))
+                }
+            } else {
+                results.actions.forEach {
+                    ServerPlayNetworking.send(player, ActionS2CPacket(it))
+                }
+                val remainingPages = lastNetworkPage - results.page
+                if (remainingPages > 0) {
+                    DatabaseManager.searchActionPages(
+                        results.searchParams,
+                        results.page + 1,
+                        remainingPages
+                    ).flatMap(SearchResults::actions).forEach {
+                        ServerPlayNetworking.send(player, ActionS2CPacket(it))
+                    }
                 }
             }
             return

@@ -33,9 +33,16 @@ object SearchCommand : BuildableCommand {
         Ledger.launch {
             try {
                 Ledger.searchCache[source.name] = params
+                Ledger.clearSearchResults(source.name)
 
                 MessageUtils.warnBusy(source)
-                val results = DatabaseManager.searchActions(params, 1)
+                val resultPages = DatabaseManager.searchActionPages(
+                    params,
+                    1,
+                    Ledger.SEARCH_RESULT_PREFETCH_PAGES
+                )
+                Ledger.cacheSearchResults(source.name, params, resultPages)
+                val results = resultPages.first()
 
                 if (results.actions.isEmpty()) {
                     source.sendError(Text.translatable("error.ledger.command.no_results"))

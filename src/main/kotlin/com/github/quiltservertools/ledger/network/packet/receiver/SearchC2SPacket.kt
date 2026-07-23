@@ -65,7 +65,9 @@ data class SearchC2SPacket(val args: String, val pages: Int) : CustomPayload {
             Ledger.launch {
                 try {
                     Ledger.searchCache[source.name] = params
+                    Ledger.clearSearchResults(source.name)
                     val resultPages = DatabaseManager.searchActionPages(params, 1, pages)
+                    Ledger.cacheSearchResults(source.name, params, resultPages)
                     if (resultPages.first().actions.isEmpty()) {
                         ResponseS2CPacket.sendResponse(
                             ResponseContent(LedgerPacketTypes.SEARCH.id, ResponseCodes.NO_RESULTS.code),

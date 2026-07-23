@@ -2,6 +2,7 @@ package com.github.quiltservertools.ledger
 
 import com.github.quiltservertools.ledger.actionutils.ActionSearchParams
 import com.github.quiltservertools.ledger.actionutils.Preview
+import com.github.quiltservertools.ledger.actionutils.SearchResults
 import com.github.quiltservertools.ledger.api.ExtensionManager
 import com.github.quiltservertools.ledger.api.LedgerApi
 import com.github.quiltservertools.ledger.api.LedgerApiImpl
@@ -49,6 +50,9 @@ import com.github.quiltservertools.ledger.config.config as realConfig
 
 object Ledger : DedicatedServerModInitializer, CoroutineScope {
     const val MOD_ID = "ledger"
+    const val SEARCH_RESULT_PREFETCH_PAGES = 10
+    private const val SEARCH_RESULT_CACHE_PAGES = SEARCH_RESULT_PREFETCH_PAGES * 2
+    private const val SEARCH_RESULT_CACHE_TTL_NANOS = 30_000_000_000L
     val DEFAULT_DATABASE = SQLiteDialect.dialectName
 
     @JvmStatic
@@ -58,11 +62,60 @@ object Ledger : DedicatedServerModInitializer, CoroutineScope {
     lateinit var config: Config
     lateinit var server: MinecraftServer
     val searchCache = ConcurrentHashMap<String, ActionSearchParams>()
+    private val searchResultsCache = ConcurrentHashMap<String, CachedSearchResults>()
 
     @JvmField // Required for mixin access
     val previewCache = ConcurrentHashMap<UUID, Preview>()
-
     override val coroutineContext: CoroutineContext = Dispatchers.Default + CoroutineName("Ledger")
+
+    private data class CachedSearchResults(
+        val params: ActionSearchParams,
+        val pages: Map<Int, SearchResults>,
+        val cachedAtNanos: Long
+    ) {
+        fun isFresh(): Boolean = System.nanoTime() - cachedAtNanos < SEARCH_RESULT_CACHE_TTL_NANOS
+    }
+
+    fun clearSearchResults(sourceName: String) {
+        searchResultsCache.remove(sourceName)
+    }
+
+    fun clearAllSearchResults() {
+        searchResultsCache.clear()
+    }
+
+    fun cacheSearchResults(sourceName: String, params: ActionSearchParams, results: Collection<SearchResults>) {
+        if (results.isEmpty()) return
+        searchResultsCache.compute(sourceName) { _, previous ->
+            val pages = if (previous?.params === params && previous.isFresh()) {
+                previous.pages.toMutableMap()
+            } else {
+                mutableMapOf()
+            }
+            results.forEach { result ->
+                pages.remove(result.page)
+                pages[result.page] = result
+            }
+            while (pages.size > SEARCH_RESULT_CACHE_PAGES) {
+                pages.remove(pages.keys.first())
+            }
+            CachedSearchResults(params, pages, System.nanoTime())
+        }
+    }
+
+    fun getCachedSearchResult(sourceName: String, params: ActionSearchParams, page: Int): SearchResults? =
+        searchResultsCache[sourceName]
+            ?.takeIf { it.params === params && it.isFresh() }
+            ?.pages
+            ?.get(page)
+
+    fun getCachedSearchTotalPages(sourceName: String, params: ActionSearchParams): Int? =
+        searchResultsCache[sourceName]
+            ?.takeIf { it.params === params && it.isFresh() }
+            ?.pages
+            ?.values
+            ?.firstOrNull()
+            ?.pages
 
     override fun onInitializeServer() {
         val version = FabricLoader.getInstance().getModContainer(MOD_ID).get().metadata.version

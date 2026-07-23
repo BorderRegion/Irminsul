@@ -22,7 +22,8 @@ interface LedgerStore {
     suspend fun searchActionPages(
         params: ActionSearchParams,
         firstPage: Int,
-        pageCount: Int
+        pageCount: Int,
+        totalPagesHint: Int? = null
     ): List<SearchResults>
     suspend fun countActions(params: ActionSearchParams): Long
     suspend fun selectRollback(params: ActionSearchParams): List<ActionType>

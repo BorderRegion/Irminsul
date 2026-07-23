@@ -254,7 +254,8 @@ class IrminsulLedgerStore : LedgerStore {
     override suspend fun searchActionPages(
         params: ActionSearchParams,
         firstPage: Int,
-        pageCount: Int
+        pageCount: Int,
+        totalPagesHint: Int?
     ): List<SearchResults> = synchronized(lock) {
         val normalizedPage = firstPage.coerceAtLeast(1)
         val normalizedPageCount = pageCount.coerceAtLeast(1)
@@ -263,9 +264,27 @@ class IrminsulLedgerStore : LedgerStore {
         val requestedActions = (pageSize.toLong() * normalizedPageCount.toLong())
             .coerceAtMost(Int.MAX_VALUE.toLong())
             .toInt()
+        totalPagesHint?.coerceAtLeast(0)?.let { totalPages ->
+            if (totalPages == 0 || normalizedPage > totalPages) {
+                return@synchronized listOf(SearchResults(emptyList(), params, normalizedPage, totalPages))
+            }
+            val actions = pageMatchingActions(params, newestFirst = true, offset, requestedActions)
+            if (actions.isEmpty()) {
+                return@synchronized listOf(SearchResults(emptyList(), params, normalizedPage, totalPages))
+            }
+            return@synchronized actions.chunked(pageSize).mapIndexed { pageOffset, storedActions ->
+                SearchResults(
+                    storedActions.mapNotNull { it.toActionType() },
+                    params,
+                    normalizedPage + pageOffset,
+                    totalPages
+                )
+            }
+        }
         val fastCount = countMatchingActionsWithoutScan(params)
-        val result = if (fastCount != null) {
-            val totalMatches = fastCount
+        val summarizedCount = fastCount ?: countMatchingActionsFromSummaries(params)
+        val result = if (summarizedCount != null) {
+            val totalMatches = summarizedCount
             val actions = if (offset >= totalMatches) {
                 emptyList()
             } else {
@@ -1084,6 +1103,7 @@ class IrminsulLedgerStore : LedgerStore {
 
     private fun countMatchingActions(params: ActionSearchParams): Long {
         countMatchingActionsWithoutScan(params)?.let { return it }
+        countMatchingActionsFromSummaries(params)?.let { return it }
         var count = 0L
         forEachMatchingHotAction(params, newestFirst = false) {
             count += 1
@@ -1094,6 +1114,51 @@ class IrminsulLedgerStore : LedgerStore {
             true
         }
         return count
+    }
+
+    /**
+     * Counts time-filtered searches from segment metadata. Only segments that overlap a time boundary
+     * need record-level filtering; fully covered cold segments can use their exact counters.
+     */
+    private fun countMatchingActionsFromSummaries(params: ActionSearchParams): Long? {
+        if (!params.supportsSegmentSummaryCount()) return null
+
+        val oldestResidentId = oldestResidentId()
+        var count = 0L
+        forEachMatchingHotAction(params, newestFirst = false) {
+            count += 1
+            true
+        }
+        if (!shouldScanCold()) return count
+
+        val filter = DiskSearchFilter(params, ::dictionaryValue, rolledBack::get)
+        for (file in segmentFiles()) {
+            val summary = segmentSummaries[parseSegmentNumber(file)] ?: return null
+            if (!summary.mightMatch(params, oldestResidentId)) continue
+
+            if (summary.isEntirelyBefore(oldestResidentId) && summary.isFullyCoveredByTime(params)) {
+                count += summary.countMatching(params)
+            } else {
+                forEachSegmentMatchingRecord(file, oldestResidentId, filter) { _, _, _ ->
+                    count += 1
+                    true
+                }
+            }
+        }
+        return count
+    }
+
+    private fun ActionSearchParams.supportsSegmentSummaryCount(): Boolean {
+        if (bounds != null || rolledBack != null) return false
+        val filters = listOf(actions, objects, sourceNames, sourcePlayerIds, worlds)
+            .count { !it.isNullOrEmpty() }
+        if (filters > 1) return false
+        if (listOf(actions, objects, sourceNames, sourcePlayerIds, worlds)
+                .any { values -> values.orEmpty().any { !it.allowed } }
+        ) {
+            return false
+        }
+        return objects.orEmpty().map { it.property }.distinct().size <= 1
     }
 
     private fun countMatchingActionsWithoutScan(params: ActionSearchParams): Long? {
@@ -2000,6 +2065,7 @@ class IrminsulLedgerStore : LedgerStore {
         var actionCount = 0
             private set
         private var minId = Int.MAX_VALUE
+        private var maxId = Int.MIN_VALUE
         private var minTimestamp = Instant.MAX
         private var maxTimestamp = Instant.MIN
         private var minX = Int.MAX_VALUE
@@ -2018,6 +2084,7 @@ class IrminsulLedgerStore : LedgerStore {
         fun add(action: StoredAction) {
             actionCount += 1
             minId = minOf(minId, action.id)
+            maxId = maxOf(maxId, action.id)
             minTimestamp = minOf(minTimestamp, action.timestamp)
             maxTimestamp = maxOf(maxTimestamp, action.timestamp)
             minX = minOf(minX, action.x)
@@ -2044,6 +2111,25 @@ class IrminsulLedgerStore : LedgerStore {
         fun countPlayers(values: Set<UUID>): Long = values.sumOf { players[it]?.toLong() ?: 0L }
 
         fun countObject(value: Identifier): Long = objects[value]?.toLong() ?: 0L
+
+        internal fun isEntirelyBefore(maxExclusiveId: Int): Boolean = maxId < maxExclusiveId
+
+        internal fun isFullyCoveredByTime(params: ActionSearchParams): Boolean {
+            params.after?.let { if (minTimestamp.isBefore(it)) return false }
+            params.before?.let { if (maxTimestamp.isAfter(it)) return false }
+            return true
+        }
+
+        internal fun countMatching(params: ActionSearchParams): Long = when {
+            !params.actions.isNullOrEmpty() -> countActions(params.actions!!.map { it.property }.toSet())
+            !params.objects.isNullOrEmpty() -> countObject(params.objects!!.first().property)
+            !params.sourceNames.isNullOrEmpty() -> countSources(params.sourceNames!!.map { it.property }.toSet())
+            !params.sourcePlayerIds.isNullOrEmpty() -> countPlayers(
+                params.sourcePlayerIds!!.map { it.property }.toSet()
+            )
+            !params.worlds.isNullOrEmpty() -> countWorlds(params.worlds!!.map { it.property }.toSet())
+            else -> actionCount.toLong()
+        }
 
         fun mightMatch(params: ActionSearchParams?, maxExclusiveId: Int): Boolean {
             if (minId >= maxExclusiveId) return false

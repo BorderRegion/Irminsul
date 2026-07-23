@@ -160,9 +160,10 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
     override suspend fun searchActionPages(
         params: ActionSearchParams,
         firstPage: Int,
-        pageCount: Int
+        pageCount: Int,
+        totalPagesHint: Int?
     ): List<SearchResults> = execute {
-        return@execute selectActionPages(params, firstPage, pageCount)
+        return@execute selectActionPages(params, firstPage, pageCount, totalPagesHint)
     }
 
     override suspend fun countActions(params: ActionSearchParams): Long = execute {
@@ -507,20 +508,26 @@ class SqlLedgerStore(private val dataSource: DataSource?) : LedgerStore {
     private fun Transaction.selectActionPages(
         params: ActionSearchParams,
         firstPage: Int,
-        pageCount: Int
+        pageCount: Int,
+        totalPagesHint: Int?
     ): List<SearchResults> {
         val normalizedPage = firstPage.coerceAtLeast(1)
         val normalizedPageCount = pageCount.coerceAtLeast(1)
         val pageSize = config[SearchSpec.pageSize].coerceAtLeast(1)
 
-        val totalActions: Long = countActions(params)
-        if (totalActions == 0L) {
+        val totalPages = totalPagesHint?.coerceAtLeast(0) ?: run {
+            val totalActions = countActions(params)
+            if (totalActions == 0L) {
+                0
+            } else {
+                ((totalActions - 1L) / pageSize.toLong() + 1L)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+            }
+        }
+        if (totalPages == 0) {
             return listOf(SearchResults(emptyList(), params, normalizedPage, 0))
         }
-
-        val totalPages = ((totalActions - 1L) / pageSize.toLong() + 1L)
-            .coerceAtMost(Int.MAX_VALUE.toLong())
-            .toInt()
         if (normalizedPage > totalPages) {
             return listOf(SearchResults(emptyList(), params, normalizedPage, totalPages))
         }

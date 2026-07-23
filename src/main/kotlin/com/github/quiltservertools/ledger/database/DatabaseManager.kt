@@ -1,5 +1,6 @@
 package com.github.quiltservertools.ledger.database
 
+import com.github.quiltservertools.ledger.Ledger
 import com.github.quiltservertools.ledger.actions.ActionType
 import com.github.quiltservertools.ledger.actionutils.ActionSearchParams
 import com.github.quiltservertools.ledger.actionutils.Preview
@@ -34,24 +35,32 @@ object DatabaseManager {
 
     fun ensureTables() = store.ensureTables()
     suspend fun setupCache() = store.setupCache()
-    suspend fun autoPurge() = store.autoPurge()
+    suspend fun autoPurge() {
+        store.autoPurge()
+        Ledger.clearAllSearchResults()
+    }
     suspend fun searchActions(params: ActionSearchParams, page: Int): SearchResults =
         store.searchActions(params, page)
 
     suspend fun searchActionPages(
         params: ActionSearchParams,
         firstPage: Int,
-        pageCount: Int
-    ): List<SearchResults> = store.searchActionPages(params, firstPage, pageCount)
+        pageCount: Int,
+        totalPagesHint: Int? = null
+    ): List<SearchResults> = store.searchActionPages(params, firstPage, pageCount, totalPagesHint)
 
     suspend fun countActions(params: ActionSearchParams): Long =
         store.countActions(params)
 
-    suspend fun rollbackActions(actionIds: Set<Int>) =
+    suspend fun rollbackActions(actionIds: Set<Int>) {
         store.rollbackActions(actionIds)
+        if (actionIds.isNotEmpty()) Ledger.clearAllSearchResults()
+    }
 
-    suspend fun restoreActions(actionIds: Set<Int>) =
+    suspend fun restoreActions(actionIds: Set<Int>) {
         store.restoreActions(actionIds)
+        if (actionIds.isNotEmpty()) Ledger.clearAllSearchResults()
+    }
 
     suspend fun selectRollback(params: ActionSearchParams): List<ActionType> =
         store.selectRollback(params)
@@ -68,8 +77,9 @@ object DatabaseManager {
     suspend fun previewActions(params: ActionSearchParams, type: Preview.Type): List<ActionType> =
         store.previewActions(params, type)
 
-    suspend fun logActionBatch(actions: List<ActionType>) =
+    suspend fun logActionBatch(actions: List<ActionType>) {
         store.logActionBatch(actions)
+    }
 
     suspend fun registerWorld(identifier: Identifier) =
         store.registerWorld(identifier)
@@ -83,8 +93,10 @@ object DatabaseManager {
     suspend fun insertIdentifiers(identifiers: Collection<Identifier>) =
         store.insertIdentifiers(identifiers)
 
-    suspend fun purgeActions(params: ActionSearchParams) =
+    suspend fun purgeActions(params: ActionSearchParams) {
         store.purgeActions(params)
+        Ledger.clearAllSearchResults()
+    }
 
     suspend fun searchPlayers(playerIds: Set<UUID>): List<PlayerResult> =
         store.searchPlayers(playerIds)
