@@ -31,27 +31,28 @@ object MessageUtils {
                 results.pages.toLong(),
                 results.page.toLong() + MAX_NETWORK_RESULT_PAGES.toLong() - 1L
             ).toInt()
-            val cachedPages = (results.page..lastNetworkPage).mapNotNull {
-                Ledger.getCachedSearchResult(source.name, results.searchParams, it)
+            val pagesToSend = mutableListOf(results)
+            var firstMissingPage: Int? = null
+            for (page in results.page + 1..lastNetworkPage) {
+                val cachedPage = Ledger.getCachedSearchResult(source.name, results.searchParams, page)
+                if (cachedPage == null) {
+                    firstMissingPage = page
+                    break
+                }
+                pagesToSend += cachedPage
             }
-            if (cachedPages.size == lastNetworkPage - results.page + 1) {
-                cachedPages.flatMap(SearchResults::actions).forEach {
-                    ServerPlayNetworking.send(player, ActionS2CPacket(it))
-                }
-            } else {
-                results.actions.forEach {
-                    ServerPlayNetworking.send(player, ActionS2CPacket(it))
-                }
-                val remainingPages = lastNetworkPage - results.page
-                if (remainingPages > 0) {
-                    DatabaseManager.searchActionPages(
-                        results.searchParams,
-                        results.page + 1,
-                        remainingPages
-                    ).flatMap(SearchResults::actions).forEach {
-                        ServerPlayNetworking.send(player, ActionS2CPacket(it))
-                    }
-                }
+            firstMissingPage?.let { firstPage ->
+                val fetchedPages = DatabaseManager.searchActionPages(
+                    results.searchParams,
+                    firstPage,
+                    lastNetworkPage - firstPage + 1,
+                    results.pages
+                )
+                Ledger.cacheSearchResults(source.name, results.searchParams, fetchedPages)
+                pagesToSend += fetchedPages
+            }
+            pagesToSend.flatMap(SearchResults::actions).forEach {
+                ServerPlayNetworking.send(player, ActionS2CPacket(it))
             }
             return
         }

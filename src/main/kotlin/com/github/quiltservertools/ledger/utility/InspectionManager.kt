@@ -79,7 +79,7 @@ fun ServerCommandSource.inspectBlock(pos: BlockPos) {
             worlds = mutableSetOf(Negatable.allow(source.world.registryKey.value))
         }
 
-        Ledger.searchCache[source.name] = params
+        Ledger.beginSearch(source.name, params)
 
         MessageUtils.warnBusy(source)
         val resultPages = DatabaseManager.searchActionPages(
@@ -150,7 +150,7 @@ suspend fun PlayerEntity.getInspectResultPages(pos: BlockPos, pageCount: Int): L
         worlds = mutableSetOf(Negatable.allow(source.world.registryKey.value))
     }
 
-    Ledger.searchCache[source.name] = params
+    Ledger.beginSearch(source.name, params)
     MessageUtils.warnBusy(source)
     return DatabaseManager.searchActionPages(params, 1, pageCount).also {
         Ledger.cacheSearchResults(source.name, params, it)

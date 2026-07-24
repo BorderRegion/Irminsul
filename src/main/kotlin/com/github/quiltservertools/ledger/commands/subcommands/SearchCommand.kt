@@ -29,12 +29,10 @@ object SearchCommand : BuildableCommand {
     @Suppress("TooGenericExceptionCaught")
     private fun search(context: Context, params: ActionSearchParams): Int {
         val source = context.source
+        Ledger.beginSearch(source.name, params)
 
         Ledger.launch {
             try {
-                Ledger.searchCache[source.name] = params
-                Ledger.clearSearchResults(source.name)
-
                 MessageUtils.warnBusy(source)
                 val resultPages = DatabaseManager.searchActionPages(
                     params,

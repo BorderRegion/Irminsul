@@ -52,6 +52,7 @@ object Ledger : DedicatedServerModInitializer, CoroutineScope {
     const val MOD_ID = "ledger"
     const val SEARCH_RESULT_PREFETCH_PAGES = 10
     private const val SEARCH_RESULT_CACHE_PAGES = SEARCH_RESULT_PREFETCH_PAGES * 2
+    private const val SEARCH_RESULT_CACHE_SOURCES = 64
     private const val SEARCH_RESULT_CACHE_TTL_NANOS = 30_000_000_000L
     val DEFAULT_DATABASE = SQLiteDialect.dialectName
 
@@ -62,22 +63,26 @@ object Ledger : DedicatedServerModInitializer, CoroutineScope {
     lateinit var config: Config
     lateinit var server: MinecraftServer
     val searchCache = ConcurrentHashMap<String, ActionSearchParams>()
-    private val searchResultsCache = ConcurrentHashMap<String, CachedSearchResults>()
+    private val searchStateLock = Any()
+    private val searchResultsCache = SearchResultCache(
+        SEARCH_RESULT_CACHE_PAGES,
+        SEARCH_RESULT_CACHE_SOURCES,
+        SEARCH_RESULT_CACHE_TTL_NANOS
+    )
 
     @JvmField // Required for mixin access
     val previewCache = ConcurrentHashMap<UUID, Preview>()
     override val coroutineContext: CoroutineContext = Dispatchers.Default + CoroutineName("Ledger")
 
-    private data class CachedSearchResults(
-        val params: ActionSearchParams,
-        val pages: Map<Int, SearchResults>,
-        val cachedAtNanos: Long
-    ) {
-        fun isFresh(): Boolean = System.nanoTime() - cachedAtNanos < SEARCH_RESULT_CACHE_TTL_NANOS
+    fun beginSearch(sourceName: String, params: ActionSearchParams) {
+        synchronized(searchStateLock) {
+            searchCache[sourceName] = params
+            searchResultsCache.clear(sourceName)
+        }
     }
 
     fun clearSearchResults(sourceName: String) {
-        searchResultsCache.remove(sourceName)
+        searchResultsCache.clear(sourceName)
     }
 
     fun clearAllSearchResults() {
@@ -85,37 +90,18 @@ object Ledger : DedicatedServerModInitializer, CoroutineScope {
     }
 
     fun cacheSearchResults(sourceName: String, params: ActionSearchParams, results: Collection<SearchResults>) {
-        if (results.isEmpty()) return
-        searchResultsCache.compute(sourceName) { _, previous ->
-            val pages = if (previous?.params === params && previous.isFresh()) {
-                previous.pages.toMutableMap()
-            } else {
-                mutableMapOf()
+        synchronized(searchStateLock) {
+            if (searchCache[sourceName] === params) {
+                searchResultsCache.put(sourceName, params, results)
             }
-            results.forEach { result ->
-                pages.remove(result.page)
-                pages[result.page] = result
-            }
-            while (pages.size > SEARCH_RESULT_CACHE_PAGES) {
-                pages.remove(pages.keys.first())
-            }
-            CachedSearchResults(params, pages, System.nanoTime())
         }
     }
 
     fun getCachedSearchResult(sourceName: String, params: ActionSearchParams, page: Int): SearchResults? =
-        searchResultsCache[sourceName]
-            ?.takeIf { it.params === params && it.isFresh() }
-            ?.pages
-            ?.get(page)
+        searchResultsCache.get(sourceName, params, page)
 
     fun getCachedSearchTotalPages(sourceName: String, params: ActionSearchParams): Int? =
-        searchResultsCache[sourceName]
-            ?.takeIf { it.params === params && it.isFresh() }
-            ?.pages
-            ?.values
-            ?.firstOrNull()
-            ?.pages
+        searchResultsCache.getTotalPages(sourceName, params)
 
     override fun onInitializeServer() {
         val version = FabricLoader.getInstance().getModContainer(MOD_ID).get().metadata.version
@@ -200,6 +186,89 @@ object Ledger : DedicatedServerModInitializer, CoroutineScope {
     }
 
     fun identifier(path: String) = Identifier.of(MOD_ID, path)
+}
+
+internal class SearchResultCache(
+    private val maxPages: Int,
+    private val maxSources: Int,
+    private val ttlNanos: Long,
+    private val nanoTime: () -> Long = System::nanoTime
+) {
+    private data class CachedSearchResults(
+        val params: ActionSearchParams,
+        val pages: LinkedHashMap<Int, SearchResults>,
+        val cachedAtNanos: Long
+    )
+
+    private val entries = linkedMapOf<String, CachedSearchResults>()
+
+    init {
+        require(maxPages > 0)
+        require(maxSources > 0)
+        require(ttlNanos > 0)
+    }
+
+    @Synchronized
+    fun clear(sourceName: String) {
+        entries.remove(sourceName)
+    }
+
+    @Synchronized
+    fun clear() {
+        entries.clear()
+    }
+
+    @Synchronized
+    fun put(sourceName: String, params: ActionSearchParams, results: Collection<SearchResults>) {
+        if (results.isEmpty()) return
+
+        val now = nanoTime()
+        removeExpired(now)
+        val previous = entries[sourceName]?.takeIf { it.params === params }
+        val pages = previous?.pages?.let(::LinkedHashMap) ?: linkedMapOf()
+        results.forEach { result ->
+            pages.remove(result.page)
+            pages[result.page] = result
+        }
+        while (pages.size > maxPages) {
+            pages.remove(pages.keys.first())
+        }
+        entries[sourceName] = CachedSearchResults(params, pages, previous?.cachedAtNanos ?: now)
+        while (entries.size > maxSources) {
+            val oldestSource = entries.minBy { it.value.cachedAtNanos }.key
+            entries.remove(oldestSource)
+        }
+    }
+
+    @Synchronized
+    fun get(sourceName: String, params: ActionSearchParams, page: Int): SearchResults? {
+        removeExpired(nanoTime())
+        return entries[sourceName]
+            ?.takeIf { it.params === params }
+            ?.pages
+            ?.get(page)
+    }
+
+    @Synchronized
+    fun getTotalPages(sourceName: String, params: ActionSearchParams): Int? {
+        removeExpired(nanoTime())
+        return entries[sourceName]
+            ?.takeIf { it.params === params }
+            ?.pages
+            ?.values
+            ?.firstOrNull()
+            ?.pages
+    }
+
+    @Synchronized
+    fun sourceCount(): Int {
+        removeExpired(nanoTime())
+        return entries.size
+    }
+
+    private fun removeExpired(now: Long) {
+        entries.entries.removeIf { now - it.value.cachedAtNanos >= ttlNanos }
+    }
 }
 
 fun logDebug(message: String) = Ledger.logger.debug(message)

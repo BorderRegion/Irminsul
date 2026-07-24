@@ -1,6 +1,7 @@
 package com.github.quiltservertools.ledger.commands.parameters
 
 import com.github.quiltservertools.ledger.Ledger
+import com.github.quiltservertools.ledger.SearchResultCache
 import com.github.quiltservertools.ledger.actionutils.ActionSearchParams
 import com.github.quiltservertools.ledger.actionutils.SearchResults
 import com.github.quiltservertools.ledger.commands.subcommands.resolveDirectPlayerIds
@@ -29,7 +30,9 @@ fun main() {
     playerNameIndexRetainsOfflineAliases()
     directPlayerLookupUsesLedgerHistoryAndUuids()
     sqlPlayerAliasSchemaMigratesExistingDatabase()
-    searchResultCacheRetainsRecentWindowsAndIsolatesQueries()
+    searchResultCacheExpiresAndRetainsRecentWindows()
+    searchResultCacheBoundsSourcesAndIsolatesQueries()
+    lateSearchResultsCannotReplaceCurrentQuery()
 }
 
 private fun rollbackStatusRejectsInvalidValues() {
@@ -149,33 +152,71 @@ private fun sqlPlayerAliasSchemaMigratesExistingDatabase() {
     }
 }
 
-private fun searchResultCacheRetainsRecentWindowsAndIsolatesQueries() {
-    val sourceName = "cache-regression"
+private fun searchResultCacheExpiresAndRetainsRecentWindows() {
+    var now = 0L
+    val cache = SearchResultCache(maxPages = 20, maxSources = 2, ttlNanos = 30, nanoTime = { now })
     val params = ActionSearchParams.build {}
     val pages = (1..30).associateWith { page -> SearchResults(emptyList(), params, page, 30) }
 
-    Ledger.clearSearchResults(sourceName)
-    Ledger.cacheSearchResults(sourceName, params, (1..10).map(pages::getValue))
-    Ledger.cacheSearchResults(sourceName, params, (11..20).map(pages::getValue))
-    check((1..20).all { Ledger.getCachedSearchResult(sourceName, params, it) === pages.getValue(it) })
+    cache.put("source", params, (1..10).map(pages::getValue))
+    now = 20
+    cache.put("source", params, (11..20).map(pages::getValue))
+    check((1..20).all { cache.get("source", params, it) === pages.getValue(it) })
 
-    Ledger.cacheSearchResults(sourceName, params, (21..30).map(pages::getValue))
-    check((1..10).all { Ledger.getCachedSearchResult(sourceName, params, it) == null })
-    check((11..30).all { Ledger.getCachedSearchResult(sourceName, params, it) === pages.getValue(it) })
+    cache.put("source", params, (21..30).map(pages::getValue))
+    check((1..10).all { cache.get("source", params, it) == null })
+    check((11..30).all { cache.get("source", params, it) === pages.getValue(it) })
 
-    Ledger.cacheSearchResults(sourceName, params, (1..10).map(pages::getValue))
-    check((1..10).all { Ledger.getCachedSearchResult(sourceName, params, it) === pages.getValue(it) })
-    check((11..20).all { Ledger.getCachedSearchResult(sourceName, params, it) == null })
-    check((21..30).all { Ledger.getCachedSearchResult(sourceName, params, it) === pages.getValue(it) })
-    check(Ledger.getCachedSearchTotalPages(sourceName, params) == 30)
+    cache.put("source", params, (1..10).map(pages::getValue))
+    check((1..10).all { cache.get("source", params, it) === pages.getValue(it) })
+    check((11..20).all { cache.get("source", params, it) == null })
+    check((21..30).all { cache.get("source", params, it) === pages.getValue(it) })
+    check(cache.getTotalPages("source", params) == 30)
+
+    now = 30
+    check(cache.get("source", params, 30) == null)
+    check(cache.sourceCount() == 0)
+}
+
+private fun searchResultCacheBoundsSourcesAndIsolatesQueries() {
+    var now = 0L
+    val cache = SearchResultCache(maxPages = 20, maxSources = 2, ttlNanos = 30, nanoTime = { now })
+    val params = ActionSearchParams.build {}
+    fun result(searchParams: ActionSearchParams, page: Int = 1) =
+        SearchResults(emptyList(), searchParams, page, 1)
+
+    val first = result(params)
+    cache.put("first", params, listOf(first))
+    now++
+    cache.put("second", params, listOf(result(params)))
+    now++
+    cache.put("third", params, listOf(result(params)))
+    check(cache.get("first", params, 1) == null)
+    check(cache.sourceCount() == 2)
 
     val nextParams = ActionSearchParams.build {}
     check(params == nextParams && params !== nextParams)
-    val replacement = SearchResults(emptyList(), nextParams, 1, 1)
-    Ledger.cacheSearchResults(sourceName, nextParams, listOf(replacement))
-    check(Ledger.getCachedSearchResult(sourceName, params, 1) == null)
-    check(Ledger.getCachedSearchResult(sourceName, nextParams, 1) === replacement)
-    check(Ledger.getCachedSearchTotalPages(sourceName, nextParams) == 1)
+    val replacement = result(nextParams)
+    now++
+    cache.put("third", nextParams, listOf(replacement))
+    check(cache.get("third", params, 1) == null)
+    check(cache.get("third", nextParams, 1) === replacement)
+    check(cache.getTotalPages("third", nextParams) == 1)
+}
+
+private fun lateSearchResultsCannotReplaceCurrentQuery() {
+    val sourceName = "late-cache-regression"
+    val oldParams = ActionSearchParams.build {}
+    val currentParams = ActionSearchParams.build {}
+    val oldResult = SearchResults(emptyList(), oldParams, 1, 1)
+    val currentResult = SearchResults(emptyList(), currentParams, 1, 1)
+
+    Ledger.beginSearch(sourceName, oldParams)
+    Ledger.beginSearch(sourceName, currentParams)
+    Ledger.cacheSearchResults(sourceName, oldParams, listOf(oldResult))
+    Ledger.cacheSearchResults(sourceName, currentParams, listOf(currentResult))
+    check(Ledger.getCachedSearchResult(sourceName, oldParams, 1) == null)
+    check(Ledger.getCachedSearchResult(sourceName, currentParams, 1) === currentResult)
     Ledger.clearSearchResults(sourceName)
 }
 
